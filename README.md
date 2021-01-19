@@ -1,16 +1,16 @@
-<p align="center"><pre>
-　(⌒▽　　▽⌒)
-　 ＼ ▽　▽ ／
-　　|＼▽▽／|
-　　|ｏ＼／ｏ|
-　　ヽｏoｏoノ
-　　　￣TT￣
-　　 (⌒||⌒)
-　 |￣￣￣￣￣|
-　 |＿＿＿＿＿|
-　　|　　　　|
-　　|＿＿＿＿|
-</pre></p>
+<p align="center">
+(⌒▽　　▽⌒)<br>
+＼ ▽　▽ ／<br>
+|＼▽▽／|<br>
+|ｏ＼／ｏ|<br>
+ヽｏoｏoノ<br>
+￣TT￣<br>
+(⌒||⌒)<br>
+|￣￣￣￣￣|<br>
+|＿＿＿＿＿|<br>
+|　　　　|<br>
+|＿＿＿＿|<br>
+</p>
 
 <p align="center">
 <strong>WARP</strong>: This is an outbound transparent SMTP proxy.
