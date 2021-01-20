@@ -15,7 +15,7 @@ test:
 		-coverprofile=coverage.txt $(SOURCE_FILES) -run $(TEST_PATTERN) -timeout=5m
 
 release:
-	@test -z $(GITHUB_TOKEN) || goreleaser --snapshot --rm-dist
+	@test -z $(GITHUB_TOKEN) || goreleaser --rm-dist
 
 dist:
 	goreleaser --snapshot --skip-publish --rm-dist
