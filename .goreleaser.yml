@@ -5,15 +5,14 @@ builds:
     goos:
       - darwin
       - linux
-      - windows
     goarch:
       - amd64
     ldflags:
       - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{ .CommitDate }} -X main.builtBy=goreleaser
 archives:
-  name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
-  files:
-    - none*
+  - name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - none*
 checksum:
   name_template: '{{ .ProjectName }}_checksums.txt'
 snapshot:

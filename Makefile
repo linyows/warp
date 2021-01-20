@@ -16,3 +16,6 @@ test:
 
 release:
 	@test -z $(GITHUB_TOKEN) || goreleaser --snapshot --rm-dist
+
+dist:
+	goreleaser --snapshot --skip-publish --rm-dist
