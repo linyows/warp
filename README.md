@@ -23,12 +23,33 @@
 <a href="https://codecov.io/gh/linyows/warp"> <img src="https://img.shields.io/codecov/c/github/linyows/warp.svg?style=for-the-badge" alt="codecov"></a>
 </p><br><br>
 
+For redirect the port need by iptables rule:
+
+```
+iptables -t nat -A OUTPUT -p tcp --dport 25 -j DNAT --to-destination <proxy-ip>:<proxy-port>
+```
+
+Also, the MTA and Proxy must be on the same host to know the DST Address before NAT.
+
 Usage
 --
 
-Proxy:
+To check the operation, use the sandbox environment with the Vagrantfile in the repository.
 
 ```sh
+warp master 🏄 vagrant up
+...
+warp master 🏄 vagrant status
+Current machine states:
+
+sender                    running (virtualbox)
+receiver                  running (virtualbox)
+```
+
+Start proxy on sender:
+
+```sh
+warp master 🏄 vagrant ssh sender
 vagrant@sender:~$ /vagrant/warp -ip 192.168.30.30 -port 10025
 2021/01/19 16:17:20 new connection
 2021/01/19 16:17:20 remote addr: 192.168.30.40:42516 origin addr: 192.168.30.50:25
@@ -37,9 +58,10 @@ vagrant@sender:~$ /vagrant/warp -ip 192.168.30.30 -port 10025
 2021/01/19 16:17:20 connection closed
 ```
 
-Send mail:
+Send mail on sender:
 
 ```sh
+warp master 🏄 vagrant ssh sender
 vagrant@sender:~$ telnet localhost 25
 Trying 127.0.0.1...
 Connected to localhost.
@@ -64,9 +86,10 @@ quit
 Connection closed by foreign host.
 ```
 
-Received mail:
+Received mail on receiver:
 
 ```sh
+warp master 🏄 vagrant ssh receiver
 vagrant@receiver:~$ sudo cat /var/spool/mail/root
 From root@sender  Tue Jan 19 16:17:20 2021
 Return-Path: <root@sender>
