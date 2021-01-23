@@ -27,6 +27,7 @@ func (s *Server) Start() error {
 		return err
 	}
 	defer ln.Close()
+	log.Printf("warp listens to %s:%d", s.Addr, s.Port)
 
 	for {
 		conn, err := ln.AcceptTCP()
