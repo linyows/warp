@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-<strong>WARP</strong>: This is an outbound transparent SMTP proxy.
+<strong><i>WARP</i></strong> : This is an outbound <b>transparent</b> SMTP proxy.
 </p>
 <p align="center">
 <a href="https://github.com/linyows/warp/actions" title="actions"><img src="https://img.shields.io/github/workflow/status/linyows/warp/Go?style=for-the-badge"></a>
