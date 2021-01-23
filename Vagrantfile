@@ -29,6 +29,9 @@ Vagrant.configure("2") do |config|
     c.vm.provision 'shell', inline: setup_postfix
     c.vm.provision 'shell', inline: add_hosts
     c.vm.provision 'shell', inline: <<-SHELL
+      postconf -e smtp_bind_address='192.168.30.40'
+      systemctl restart postfix
+
       iptables -t nat -A OUTPUT -p tcp -d 127.0.0.1/32 -j RETURN
       iptables -t nat -A OUTPUT -p tcp -d 192.168.30.30/32 -j RETURN
       iptables -t nat -A OUTPUT -p tcp -s 192.168.30.30/32 -j RETURN
