@@ -1,6 +1,7 @@
 package warp
 
 import (
+	"bytes"
 	"io"
 	"log"
 	"net"
@@ -10,52 +11,32 @@ import (
 type Pipe struct {
 	Src *net.TCPConn
 	Dst *net.TCPConn
-	//ok  bool
+	Req *bytes.Buffer
+	Res *bytes.Buffer
 }
 
 func (p *Pipe) Do() {
-	log.Print("start proxy")
-	//p.ok = true
+	p.Req = new(bytes.Buffer)
+	p.Res = new(bytes.Buffer)
 
 	close := func() {
 		defer p.Dst.Close()
 		defer p.Src.Close()
 		defer log.Print("connection closed")
-		//p.ok = false
 	}
 	var once sync.Once
 
+	// src ===> dst
 	go func() {
-		io.Copy(p.Dst, p.Src)
+		w := io.MultiWriter(p.Dst, p.Req)
+		io.Copy(w, p.Src)
 		once.Do(close)
 	}()
 
+	// src <=== dst
 	go func() {
-		io.Copy(p.Src, p.Dst)
+		w := io.MultiWriter(p.Src, p.Res)
+		io.Copy(w, p.Dst)
 		once.Do(close)
 	}()
-
-	/*
-		go func() {
-			var rwc io.ReadWriteCloser = p.Dst
-			tp := textproto.NewConn(rwc)
-			for p.ok {
-				line, err := tp.ReadLine()
-				if err != nil {
-					if err == io.EOF {
-						log.Print("EOF")
-						continue
-					}
-					if neterr, ok := err.(net.Error); ok && neterr.Timeout() {
-						log.Printf("%#v", err)
-						continue
-					}
-					continue
-				}
-				fmt.Printf("%s", line)
-			}
-		}()
-	*/
-
-	log.Print("end proxy")
 }
