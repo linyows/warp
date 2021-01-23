@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"strconv"
-	"strings"
 	"syscall"
 )
 
@@ -77,12 +75,8 @@ func (s *Server) OriginalAddrDst(conn *net.TCPConn) (*net.TCPAddr, error) {
 		return nil, err
 	}
 
-	ip := strings.Join([]string{
-		strconv.FormatUint(uint64(addr.Multiaddr[4]), 10),
-		strconv.FormatUint(uint64(addr.Multiaddr[5]), 10),
-		strconv.FormatUint(uint64(addr.Multiaddr[6]), 10),
-		strconv.FormatUint(uint64(addr.Multiaddr[7]), 10),
-	}, ".")
+	ip := fmt.Sprintf("%d.%d.%d.%d", addr.Multiaddr[4],
+		addr.Multiaddr[5], addr.Multiaddr[6], addr.Multiaddr[7])
 	port := uint16(addr.Multiaddr[2])<<8 + uint16(addr.Multiaddr[3])
 
 	return &net.TCPAddr{
