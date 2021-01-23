@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"os"
+	"strconv"
+	"strings"
 	"syscall"
-	"unsafe"
 )
 
 const SO_ORIGINAL_DST = 80
@@ -41,7 +41,7 @@ func (s *Server) Start() error {
 func (s *Server) HandleConnection(conn *net.TCPConn) {
 	log.Print("new connection")
 
-	raddr, err := s.OriginalAddr(conn)
+	raddr, err := s.OriginalAddrDst(conn)
 	if err != nil {
 		log.Printf("original addr error: %#v", err)
 		return
@@ -63,45 +63,29 @@ func (s *Server) HandleConnection(conn *net.TCPConn) {
 	p.Do()
 }
 
-func (s *Server) OriginalAddr(conn *net.TCPConn) (*net.TCPAddr, error) {
+func (s *Server) OriginalAddrDst(conn *net.TCPConn) (*net.TCPAddr, error) {
 	f, err := conn.File()
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
+	fd := f.Fd()
 
-	fd := int(f.Fd())
-	if err = syscall.SetNonblock(fd, true); err != nil {
-		return nil, os.NewSyscallError("setnonblock", err)
-	}
-
-	var addr syscall.RawSockaddrInet4
-	var len uint32
-	len = uint32(unsafe.Sizeof(addr))
-	err = getsockopt(fd, syscall.IPPROTO_IP, SO_ORIGINAL_DST, unsafe.Pointer(&addr), &len)
-
+	addr, err := syscall.GetsockoptIPv6Mreq(int(fd), syscall.IPPROTO_IP, SO_ORIGINAL_DST)
 	if err != nil {
-		return nil, os.NewSyscallError("getsockopt", err)
+		return nil, err
 	}
 
-	ip := make([]byte, 4)
-	for i, b := range addr.Addr {
-		ip[i] = b
-	}
-	pb := *(*[2]byte)(unsafe.Pointer(&addr.Port))
+	ip := strings.Join([]string{
+		strconv.FormatUint(uint64(addr.Multiaddr[4]), 10),
+		strconv.FormatUint(uint64(addr.Multiaddr[5]), 10),
+		strconv.FormatUint(uint64(addr.Multiaddr[6]), 10),
+		strconv.FormatUint(uint64(addr.Multiaddr[7]), 10),
+	}, ".")
+	port := uint16(addr.Multiaddr[2])<<8 + uint16(addr.Multiaddr[3])
 
 	return &net.TCPAddr{
-		IP:   ip,
-		Port: int(pb[0])*256 + int(pb[1]),
+		IP:   net.ParseIP(ip),
+		Port: int(port),
 	}, nil
-}
-
-func getsockopt(s int, level int, optname int, optval unsafe.Pointer, optlen *uint32) (err error) {
-	_, _, e := syscall.Syscall6(
-		syscall.SYS_GETSOCKOPT, uintptr(s), uintptr(level), uintptr(optname),
-		uintptr(optval), uintptr(unsafe.Pointer(optlen)), 0)
-	if e != 0 {
-		return e
-	}
-	return
 }
