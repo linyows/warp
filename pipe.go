@@ -8,35 +8,76 @@ import (
 	"log"
 	"net"
 	"net/textproto"
-	"strings"
 	"sync"
 )
 
 type Pipe struct {
 	Src *net.TCPConn
 	Dst *net.TCPConn
-	Req *bytes.Buffer
-	Res *bytes.Buffer
 }
 
 func (p *Pipe) Do() {
-	p.Req = new(bytes.Buffer)
-	p.Res = new(bytes.Buffer)
 	var once sync.Once
 
 	// src ===> dst
 	go func() {
-		w := io.MultiWriter(p.Dst, p.Req)
-		io.Copy(w, p.Src)
+		p.Copy(p.Dst, p.Src, false)
 		once.Do(p.close())
 	}()
 
 	// src <=== dst
 	go func() {
-		w := io.MultiWriter(p.Src, p.Res)
-		io.Copy(w, p.Dst)
+		p.Copy(p.Src, p.Dst, true)
 		once.Do(p.close())
 	}()
+}
+
+func (p *Pipe) Copy(dst io.Writer, src io.Reader, backward bool) (written int64, err error) {
+	size := 32 * 1024
+	if l, ok := src.(*io.LimitedReader); ok && int64(size) > l.N {
+		if l.N < 1 {
+			size = 1
+		} else {
+			size = int(l.N)
+		}
+	}
+	buf := make([]byte, size)
+
+	for {
+		nr, er := src.Read(buf)
+		if nr > 0 {
+			if backward {
+				if bytes.Contains(buf, []byte("STARTTLS")) {
+					old := []byte("250-STARTTLS\r\n")
+					buf = bytes.Replace(buf, old, []byte(""), 1)
+					nr = nr - len(old)
+				}
+				fmt.Printf("<===\n%s\n", buf)
+			} else {
+				fmt.Printf("===>\n%s\n", buf)
+			}
+			nw, ew := dst.Write(buf[0:nr])
+			if nw > 0 {
+				written += int64(nw)
+			}
+			if ew != nil {
+				err = ew
+				break
+			}
+			if nr != nw {
+				err = io.ErrShortWrite
+				break
+			}
+		}
+		if er != nil {
+			if er != io.EOF {
+				err = er
+			}
+			break
+		}
+	}
+
+	return written, err
 }
 
 func (p *Pipe) data(b *bytes.Buffer) ([]string, error) {
@@ -60,16 +101,5 @@ func (p *Pipe) close() func() {
 		defer p.Dst.Close()
 		defer p.Src.Close()
 		defer log.Print("connection closed")
-
-		req, err := p.data(p.Req)
-		if err != nil {
-			fmt.Printf("%#v\n", err)
-		}
-		fmt.Printf("%s\n", strings.Join(req, "\n"))
-		res, err := p.data(p.Res)
-		if err != nil {
-			fmt.Printf("%#v\n", err)
-		}
-		fmt.Printf("%s\n", strings.Join(res, "\n"))
 	}
 }
