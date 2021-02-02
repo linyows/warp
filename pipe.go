@@ -1,39 +1,121 @@
 package warp
 
 import (
-	"bufio"
 	"bytes"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"log"
 	"net"
-	"net/textproto"
+	"regexp"
 	"sync"
 )
 
 type Pipe struct {
-	Src *net.TCPConn
-	Dst *net.TCPConn
+	sConn      net.Conn
+	rConn      net.Conn
+	sMailAddr  []byte
+	rMailAddr  []byte
+	serverName []byte
+	tls        bool
+	readytls   bool
+	locked     bool
+	blocker    chan interface{}
 }
+
+type Mediator func([]byte, int) ([]byte, int)
+type Direction int
+
+const (
+	mailFromPrefix string    = "MAIL FROM:<"
+	rcptToPrefix   string    = "RCPT TO:<"
+	mailRegex      string    = `[+A-z0-9.-]+@[A-z0-9.-]+`
+	bufferSize     int       = 32 * 1024
+	crlf           string    = "\r\n"
+	upstream       Direction = iota
+	downstream
+)
 
 func (p *Pipe) Do() {
 	var once sync.Once
+	p.blocker = make(chan interface{})
 
-	// src ===> dst
 	go func() {
-		p.Copy(p.Dst, p.Src, false)
+		_, err := p.copy(upstream, func(b []byte, i int) ([]byte, int) {
+			p.pairing(b)
+			if !p.tls && p.readytls {
+				p.locked = true
+				p.starttls()
+				p.readytls = false
+				fmt.Printf("==>|  \n%s\n", b)
+			}
+			if !p.locked {
+				fmt.Printf("--|-->\n%s\n", b)
+			}
+			return b, i
+		})
+		if err != nil {
+			log.Printf("upstream copy error: %s", err.Error())
+		}
 		once.Do(p.close())
 	}()
 
-	// src <=== dst
 	go func() {
-		p.Copy(p.Src, p.Dst, true)
+		_, err := p.copy(downstream, func(b []byte, i int) ([]byte, int) {
+			if !p.tls && bytes.Contains(b, []byte("STARTTLS")) {
+				fmt.Printf("  |<==\n%s\n", b)
+				old := []byte("250-STARTTLS\r\n")
+				b = bytes.Replace(b, old, []byte(""), 1)
+				i = i - len(old)
+				p.readytls = true
+				fmt.Printf("<==|  \n%s\n", b)
+			} else if !p.tls && bytes.Contains(b, []byte("Ready to start TLS")) {
+				fmt.Printf("  |<==\n%s\n", b)
+				p.connectTLS()
+			} else {
+				fmt.Printf("<--|--\n%s\n", b)
+			}
+			return b, i
+		})
+		if err != nil {
+			log.Printf("downstream copy error: %s", err.Error())
+		}
 		once.Do(p.close())
 	}()
 }
 
-func (p *Pipe) Copy(dst io.Writer, src io.Reader, backward bool) (written int64, err error) {
-	size := 32 * 1024
+func (p *Pipe) pairing(b []byte) {
+	if bytes.Contains(b, []byte(mailFromPrefix)) {
+		re := regexp.MustCompile(mailFromPrefix + mailRegex)
+		p.sMailAddr = bytes.Replace(re.Find(b), []byte(mailFromPrefix), []byte(""), 1)
+	}
+	if bytes.Contains(b, []byte(rcptToPrefix)) {
+		re := regexp.MustCompile(rcptToPrefix + mailRegex)
+		p.rMailAddr = bytes.Replace(re.Find(b), []byte(rcptToPrefix), []byte(""), 1)
+		p.serverName = bytes.Split(p.rMailAddr, []byte("@"))[1]
+	}
+}
+
+func (p *Pipe) src(d Direction) net.Conn {
+	if d == upstream {
+		return p.sConn
+	}
+	return p.rConn
+}
+
+func (p *Pipe) dst(d Direction) net.Conn {
+	if d == upstream {
+		return p.rConn
+	}
+	return p.sConn
+}
+
+func (p *Pipe) copy(dr Direction, fn Mediator) (written int64, err error) {
+	size := bufferSize
+	src, ok := p.src(dr).(io.Reader)
+	if !ok {
+		err = fmt.Errorf("io.Reader cast error")
+	}
 	if l, ok := src.(*io.LimitedReader); ok && int64(size) > l.N {
 		if l.N < 1 {
 			size = 1
@@ -41,22 +123,20 @@ func (p *Pipe) Copy(dst io.Writer, src io.Reader, backward bool) (written int64,
 			size = int(l.N)
 		}
 	}
-	buf := make([]byte, size)
+	buf := make([]byte, bufferSize)
 
 	for {
-		nr, er := src.Read(buf)
+		if p.locked {
+			continue
+		}
+
+		nr, er := p.src(dr).Read(buf)
 		if nr > 0 {
-			if backward {
-				if bytes.Contains(buf, []byte("STARTTLS")) {
-					old := []byte("250-STARTTLS\r\n")
-					buf = bytes.Replace(buf, old, []byte(""), 1)
-					nr = nr - len(old)
-				}
-				fmt.Printf("<===\n%s\n", buf)
-			} else {
-				fmt.Printf("===>\n%s\n", buf)
+			buf, nr = fn(buf, nr)
+			if dr == upstream {
+				p.waitForTLSConn(buf)
 			}
-			nw, ew := dst.Write(buf[0:nr])
+			nw, ew := p.dst(dr).Write(buf[0:nr])
 			if nw > 0 {
 				written += int64(nw)
 			}
@@ -80,26 +160,71 @@ func (p *Pipe) Copy(dst io.Writer, src io.Reader, backward bool) (written int64,
 	return written, err
 }
 
-func (p *Pipe) data(b *bytes.Buffer) ([]string, error) {
-	var data []string
-	r := textproto.NewReader(bufio.NewReader(b))
-	for {
-		line, err := r.ReadLine()
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			return data, err
-		}
-		data = append(data, line)
+func (p *Pipe) cmd(format string, args ...interface{}) error {
+	cmd := fmt.Sprintf(format+crlf, args...)
+	fmt.Printf("  |==>\n%s\n", cmd)
+	_, err := p.rConn.Write([]byte(cmd))
+	if err != nil {
+		return err
 	}
-	return data, nil
+	return nil
+}
+
+func (p *Pipe) ehlo() error {
+	return p.cmd("EHLO %s", p.serverName)
+}
+
+func (p *Pipe) starttls() error {
+	return p.cmd("STARTTLS")
+}
+
+func (p *Pipe) readReceiverConn() error {
+	buf := make([]byte, bufferSize)
+	i, err := p.rConn.Read(buf)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("  |<==\n%s\n", buf[0:i])
+	return nil
+}
+
+func (p *Pipe) waitForTLSConn(b []byte) {
+	if !p.locked {
+		return
+	}
+	log.Print("wait for tls connection")
+	<-p.blocker
+	log.Print("tls connected")
+	p.locked = false
+	fmt.Printf("  |==>\n%s\n", b)
+}
+
+func (p *Pipe) connectTLS() error {
+	p.rConn = tls.Client(p.rConn, &tls.Config{
+		InsecureSkipVerify: true,
+		ServerName:         string(p.serverName),
+	})
+
+	err := p.ehlo()
+	if err != nil {
+		return err
+	}
+
+	err = p.readReceiverConn()
+	if err != nil {
+		return err
+	}
+
+	p.tls = true
+	p.blocker <- false
+
+	return nil
 }
 
 func (p *Pipe) close() func() {
 	return func() {
-		defer p.Dst.Close()
-		defer p.Src.Close()
+		defer p.rConn.Close()
+		defer p.sConn.Close()
 		defer log.Print("connection closed")
 	}
 }
