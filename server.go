@@ -20,7 +20,7 @@ func (s *Server) Start() error {
 		return err
 	}
 
-	ln, err := net.ListenTCP("tcp", addr)
+	ln, err := net.Listen("tcp", addr.String())
 	if err != nil {
 		return err
 	}
@@ -28,7 +28,7 @@ func (s *Server) Start() error {
 	log.Printf("warp listens to %s:%d", s.Addr, s.Port)
 
 	for {
-		conn, err := ln.AcceptTCP()
+		conn, err := ln.Accept()
 		if err != nil {
 			log.Printf("accept error: %#v", err)
 			continue
@@ -37,7 +37,7 @@ func (s *Server) Start() error {
 	}
 }
 
-func (s *Server) HandleConnection(conn *net.TCPConn) {
+func (s *Server) HandleConnection(conn net.Conn) {
 	log.Print("new connection")
 
 	raddr, err := s.OriginalAddrDst(conn)
@@ -52,18 +52,23 @@ func (s *Server) HandleConnection(conn *net.TCPConn) {
 		log.Printf("resolve tcp addr error: %#v", err)
 		return
 	}
-	dstConn, err := net.DialTCP("tcp", laddr, raddr)
+	dialer := &net.Dialer{LocalAddr: laddr}
+	dstConn, err := dialer.Dial("tcp", raddr.String())
 	if err != nil {
 		log.Printf("dial '%s' error: %#v", raddr, err)
 		return
 	}
 
-	p := &Pipe{Src: conn, Dst: dstConn}
+	p := &Pipe{sConn: conn, rConn: dstConn}
 	p.Do()
 }
 
-func (s *Server) OriginalAddrDst(conn *net.TCPConn) (*net.TCPAddr, error) {
-	f, err := conn.File()
+func (s *Server) OriginalAddrDst(conn net.Conn) (*net.TCPAddr, error) {
+	tcpConn, ok := conn.(*net.TCPConn)
+	if !ok {
+		return nil, fmt.Errorf("net.TCPConn cast error")
+	}
+	f, err := tcpConn.File()
 	if err != nil {
 		return nil, err
 	}
