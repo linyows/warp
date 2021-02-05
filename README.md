@@ -51,76 +51,48 @@ Start proxy on sender:
 ```sh
 warp master 🏄 vagrant ssh sender
 vagrant@sender:~$ /vagrant/warp -ip 192.168.30.30 -port 10025
-2021/01/24 03:46:38 warp listens to 192.168.30.30:10025
-2021/01/24 03:46:40 new connection
-2021/01/24 03:46:40 remote addr: 192.168.30.40:42163 origin addr: 192.168.30.50:25
-<===
-220 receiver ESMTP Postfix (Ubuntu)
-
-===>
-EHLO sender
-
-<===
-250-receiver
-250-PIPELINING
-250-SIZE 10240000
-250-VRFY
-250-ETRN
-250-ENHANCEDSTATUSCODES
-250-8BITMIME
-250-DSN
-250-SMTPUTF8
-250 CHUNKING
-
-===>
-MAIL FROM:<root@sender> SIZE=309
+2021/02/05 15:59:59 warp listens to 192.168.30.30:10025
+2021/02/05 16:00:01 new connection
+2021/02/05 16:00:01 remote addr: 192.168.30.40:43817 origin addr: 192.168.30.50:25
+2021/02/05 16:00:02 <- 220 receiver ESMTP Postfix (Ubuntu)\r\n
+2021/02/05 16:00:02 -> EHLO sender
+2021/02/05 16:00:02 |< 250-receiver\r\n250-PIPELINING\r\n250-SIZE 10240000\r\n250-VRFY\r\n250-ETRN\r\n250-STARTTLS\r\n250-ENHANCEDSTATUSCODES\r\n250-8BITMIME\r\n250-DSN\r\n250-SMTPUTF8\r\n250 CHUNKING\r\n
+2021/02/05 16:00:02 <- 250-receiver\r\n250-PIPELINING\r\n250-SIZE 10240000\r\n250-VRFY\r\n250-ETRN\r\n250-ENHANCEDSTATUSCODES\r\n250-8BITMIME\r\n250-DSN\r\n250-SMTPUTF8\r\n250 CHUNKING\r\n
+2021/02/05 16:00:02 |> STARTTLS
+2021/02/05 16:00:02 >| MAIL FROM:<root@sender> SIZE=328\r\nRCPT TO:<root@receiver> ORCPT=rfc822;root@receiver\r\nDATA\r\n
+2021/02/05 16:00:02 wait for tls connection
+2021/02/05 16:00:02 |< 220 2.0.0 Ready to start TLS\r\n
+2021/02/05 16:00:02 |> EHLO receiver
+2021/02/05 16:00:02 |< 250-receiver\r\n250-PIPELINING\r\n250-SIZE 10240000\r\n250-VRFY\r\n250-ETRN\r\n250-ENHANCEDSTATUSCODES\r\n250-8BITMIME\r\n250-DSN\r\n250-SMTPUTF8\r\n250 CHUNKING\r\n
+2021/02/05 16:00:02 tls connected
+2021/02/05 16:00:02 |> MAIL FROM:<root@sender> SIZE=328
 RCPT TO:<root@receiver> ORCPT=rfc822;root@receiver
 DATA
-
-<===
-250 2.1.0 Ok
-250 2.1.5 Ok
-354 End data with <CR><LF>.<CR><LF>
-RN
-250-ENHANCEDSTATUSCODES
-250-8BITMIME
-250-DSN
-250-SMTPUTF8
-250 CHUNKING
-
-===>
-Received: from sender (localhost [127.0.0.1])
-        by sender (Postfix) with SMTP id 298633E8E0
-        for <root@receiver>; Sun, 24 Jan 2021 03:46:40 +0000 (UTC)
+2021/02/05 16:00:02 -> MAIL FROM:<root@sender> SIZE=328
+RCPT TO:<root@receiver> ORCPT=rfc822;root@receiver
+DATA
+2021/02/05 16:00:02 <- 250 2.1.0 Ok\r\n250 2.1.5 Ok\r\n354 End data with <CR><LF>.<CR><LF>\r\n
+2021/02/05 16:00:02 -> Received: from sender (localhost [127.0.0.1])
+        by sender (Postfix) with SMTP id C08023E8E0
+        for <root@receiver>; Fri,  5 Feb 2021 16:00:01 +0000 (UTC)
 From: <root@sender>
 To: <root@receiver>
-Date: Sun, 24 Jan 2021 03:46:40 +0000 (UTC)
-Message-Id: <12065.0003.0000@sender>
-Subject: warp!
+Date: Fri,  5 Feb 2021 16:00:01 +0000 (UTC)
+Message-Id: <c2f05.0003.0000@sender>
+Subject: Hi, Receiver from Sender
 
 XXXXXXXXXX
 .
 QUIT
-
-<===
-250 2.0.0 Ok: queued as 326BB410E2
-221 2.0.0 Bye
-LF>.<CR><LF>
-RN
-250-ENHANCEDSTATUSCODES
-250-8BITMIME
-250-DSN
-250-SMTPUTF8
-250 CHUNKING
-
-2021/01/24 03:46:50 connection closed
+2021/02/05 16:00:02 <- 250 2.0.0 Ok: queued as 3B9874160A\r\n221 2.0.0 Bye\r\n
+2021/02/05 16:00:02 connection closed
 ```
 
 Send mail on sender:
 
 ```sh
 warp master 🏄 vagrant ssh sender
-vagrant@sender:~$ smtp-source -m 1 -s 1 -l 10 -S 'warp!' -f root@sender -t root@receiver localhost:25
+vagrant@sender:~$ smtp-source -m 1 -s 1 -l 10 -S 'Hi, Receiver from Sender' -f root@sender -t root@receiver localhost:25
 ```
 
 Received mail on receiver:
@@ -128,21 +100,21 @@ Received mail on receiver:
 ```sh
 warp master 🏄 vagrant ssh receiver
 vagrant@receiver:~$ sudo cat /var/spool/mail/root
-From root@sender  Sun Jan 24 03:46:50 2021
+From root@sender  Fri Feb  5 16:00:41 2021
 Return-Path: <root@sender>
 X-Original-To: root@receiver
 Delivered-To: root@receiver
-Received: from sender (proxy [192.168.30.30])
-        by receiver (Postfix) with ESMTP id 326BB410E2
-        for <root@receiver>; Sun, 24 Jan 2021 03:46:50 +0000 (UTC)
+Received: from receiver (proxy [192.168.30.30])
+        by receiver (Postfix) with ESMTPS id 3B9874160A
+        for <root@receiver>; Fri,  5 Feb 2021 16:00:41 +0000 (UTC)
 Received: from sender (localhost [127.0.0.1])
-        by sender (Postfix) with SMTP id 298633E8E0
-        for <root@receiver>; Sun, 24 Jan 2021 03:46:40 +0000 (UTC)
+        by sender (Postfix) with SMTP id C08023E8E0
+        for <root@receiver>; Fri,  5 Feb 2021 16:00:01 +0000 (UTC)
 From: <root@sender>
 To: <root@receiver>
-Date: Sun, 24 Jan 2021 03:46:40 +0000 (UTC)
-Message-Id: <12065.0003.0000@sender>
-Subject: warp!
+Date: Fri,  5 Feb 2021 16:00:01 +0000 (UTC)
+Message-Id: <c2f05.0003.0000@sender>
+Subject: Hi, Receiver from Sender
 
 XXXXXXXXXX
 
