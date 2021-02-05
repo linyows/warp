@@ -27,12 +27,13 @@ type Mediator func([]byte, int) ([]byte, int)
 type Direction int
 
 const (
-	mailFromPrefix string    = "MAIL FROM:<"
-	rcptToPrefix   string    = "RCPT TO:<"
-	mailRegex      string    = `[+A-z0-9.-]+@[A-z0-9.-]+`
-	bufferSize     int       = 32 * 1024
-	crlf           string    = "\r\n"
-	upstream       Direction = iota
+	mailFromPrefix  string    = "MAIL FROM:<"
+	rcptToPrefix    string    = "RCPT TO:<"
+	mailRegex       string    = `[+A-z0-9.-]+@[A-z0-9.-]+`
+	bufferSize      int       = 32 * 1024
+	readyToStartTLS string    = "Ready to start TLS"
+	crlf            string    = "\r\n"
+	upstream        Direction = iota
 	downstream
 )
 
@@ -47,10 +48,7 @@ func (p *Pipe) Do() {
 				p.locked = true
 				p.starttls()
 				p.readytls = false
-				fmt.Printf("==>|  \n%s\n", b)
-			}
-			if !p.locked {
-				fmt.Printf("--|-->\n%s\n", b)
+				log.Printf(">| %s", p.escapeCRLF(b[0:i]))
 			}
 			return b, i
 		})
@@ -63,17 +61,14 @@ func (p *Pipe) Do() {
 	go func() {
 		_, err := p.copy(downstream, func(b []byte, i int) ([]byte, int) {
 			if !p.tls && bytes.Contains(b, []byte("STARTTLS")) {
-				fmt.Printf("  |<==\n%s\n", b)
+				log.Printf("|< %s", p.escapeCRLF(b[0:i]))
 				old := []byte("250-STARTTLS\r\n")
 				b = bytes.Replace(b, old, []byte(""), 1)
 				i = i - len(old)
 				p.readytls = true
-				fmt.Printf("<==|  \n%s\n", b)
-			} else if !p.tls && bytes.Contains(b, []byte("Ready to start TLS")) {
-				fmt.Printf("  |<==\n%s\n", b)
+			} else if !p.tls && bytes.Contains(b, []byte(readyToStartTLS)) {
+				log.Printf("|< %s", p.escapeCRLF(b[0:i]))
 				p.connectTLS()
-			} else {
-				fmt.Printf("<--|--\n%s\n", b)
 			}
 			return b, i
 		})
@@ -133,8 +128,19 @@ func (p *Pipe) copy(dr Direction, fn Mediator) (written int64, err error) {
 		nr, er := p.src(dr).Read(buf)
 		if nr > 0 {
 			buf, nr = fn(buf, nr)
+			if dr == upstream && p.locked {
+				p.waitForTLSConn(buf, nr)
+			}
+			if nr == 0 {
+				continue
+			}
 			if dr == upstream {
-				p.waitForTLSConn(buf)
+				log.Printf("-> %s", buf[0:nr])
+			} else {
+				if bytes.Contains(buf, []byte(readyToStartTLS)) {
+					continue
+				}
+				log.Printf("<- %s", p.escapeCRLF(buf[0:nr]))
 			}
 			nw, ew := p.dst(dr).Write(buf[0:nr])
 			if nw > 0 {
@@ -162,7 +168,7 @@ func (p *Pipe) copy(dr Direction, fn Mediator) (written int64, err error) {
 
 func (p *Pipe) cmd(format string, args ...interface{}) error {
 	cmd := fmt.Sprintf(format+crlf, args...)
-	fmt.Printf("  |==>\n%s\n", cmd)
+	log.Printf("|> %s", cmd)
 	_, err := p.rConn.Write([]byte(cmd))
 	if err != nil {
 		return err
@@ -184,19 +190,16 @@ func (p *Pipe) readReceiverConn() error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("  |<==\n%s\n", buf[0:i])
+	log.Printf("|< %s", p.escapeCRLF(buf[0:i]))
 	return nil
 }
 
-func (p *Pipe) waitForTLSConn(b []byte) {
-	if !p.locked {
-		return
-	}
+func (p *Pipe) waitForTLSConn(b []byte, i int) {
 	log.Print("wait for tls connection")
 	<-p.blocker
 	log.Print("tls connected")
 	p.locked = false
-	fmt.Printf("  |==>\n%s\n", b)
+	log.Printf("|> %s", b[0:i])
 }
 
 func (p *Pipe) connectTLS() error {
@@ -219,6 +222,10 @@ func (p *Pipe) connectTLS() error {
 	p.blocker <- false
 
 	return nil
+}
+
+func (p *Pipe) escapeCRLF(b []byte) []byte {
+	return bytes.ReplaceAll(b, []byte(crlf), []byte("\\r\\n"))
 }
 
 func (p *Pipe) close() func() {
