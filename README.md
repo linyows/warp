@@ -20,6 +20,8 @@ iptables -t nat -A OUTPUT -p tcp --dport 25 -j DNAT --to-destination <proxy-ip>:
 
 Also, the MTA and Proxy must be on the same host to know the DST Address before NAT.
 
+![Architecture](https://github.com/linyows/warp/blob/master/misc/architecture.png)
+
 Usage
 --
 
@@ -40,41 +42,7 @@ Start proxy on sender:
 ```sh
 warp master 🏄 vagrant ssh sender
 vagrant@sender:~$ /vagrant/warp -ip 192.168.30.30 -port 10025
-2021/02/05 15:59:59 warp listens to 192.168.30.30:10025
-2021/02/05 16:00:01 new connection
-2021/02/05 16:00:01 remote addr: 192.168.30.40:43817 origin addr: 192.168.30.50:25
-2021/02/05 16:00:02 <- 220 receiver ESMTP Postfix (Ubuntu)\r\n
-2021/02/05 16:00:02 -> EHLO sender
-2021/02/05 16:00:02 |< 250-receiver\r\n250-PIPELINING\r\n250-SIZE 10240000\r\n250-VRFY\r\n250-ETRN\r\n250-STARTTLS\r\n250-ENHANCEDSTATUSCODES\r\n250-8BITMIME\r\n250-DSN\r\n250-SMTPUTF8\r\n250 CHUNKING\r\n
-2021/02/05 16:00:02 <- 250-receiver\r\n250-PIPELINING\r\n250-SIZE 10240000\r\n250-VRFY\r\n250-ETRN\r\n250-ENHANCEDSTATUSCODES\r\n250-8BITMIME\r\n250-DSN\r\n250-SMTPUTF8\r\n250 CHUNKING\r\n
-2021/02/05 16:00:02 |> STARTTLS
-2021/02/05 16:00:02 >| MAIL FROM:<root@sender> SIZE=328\r\nRCPT TO:<root@receiver> ORCPT=rfc822;root@receiver\r\nDATA\r\n
-2021/02/05 16:00:02 wait for tls connection
-2021/02/05 16:00:02 |< 220 2.0.0 Ready to start TLS\r\n
-2021/02/05 16:00:02 |> EHLO receiver
-2021/02/05 16:00:02 |< 250-receiver\r\n250-PIPELINING\r\n250-SIZE 10240000\r\n250-VRFY\r\n250-ETRN\r\n250-ENHANCEDSTATUSCODES\r\n250-8BITMIME\r\n250-DSN\r\n250-SMTPUTF8\r\n250 CHUNKING\r\n
-2021/02/05 16:00:02 tls connected
-2021/02/05 16:00:02 |> MAIL FROM:<root@sender> SIZE=328
-RCPT TO:<root@receiver> ORCPT=rfc822;root@receiver
-DATA
-2021/02/05 16:00:02 -> MAIL FROM:<root@sender> SIZE=328
-RCPT TO:<root@receiver> ORCPT=rfc822;root@receiver
-DATA
-2021/02/05 16:00:02 <- 250 2.1.0 Ok\r\n250 2.1.5 Ok\r\n354 End data with <CR><LF>.<CR><LF>\r\n
-2021/02/05 16:00:02 -> Received: from sender (localhost [127.0.0.1])
-        by sender (Postfix) with SMTP id C08023E8E0
-        for <root@receiver>; Fri,  5 Feb 2021 16:00:01 +0000 (UTC)
-From: <root@sender>
-To: <root@receiver>
-Date: Fri,  5 Feb 2021 16:00:01 +0000 (UTC)
-Message-Id: <c2f05.0003.0000@sender>
-Subject: Hi, Receiver from Sender
-
-XXXXXXXXXX
-.
-QUIT
-2021/02/05 16:00:02 <- 250 2.0.0 Ok: queued as 3B9874160A\r\n221 2.0.0 Bye\r\n
-2021/02/05 16:00:02 connection closed
+2021/02/06 14:50:44 warp listens to 192.168.30.30:10025
 ```
 
 Send mail on sender:
@@ -82,6 +50,29 @@ Send mail on sender:
 ```sh
 warp master 🏄 vagrant ssh sender
 vagrant@sender:~$ smtp-source -m 1 -s 1 -l 10 -S 'Hi, Receiver from Sender' -f root@sender -t root@receiver localhost:25
+```
+
+Output by proxy on sender:
+
+```sh
+2021/02/06 14:50:48 connected from 192.168.30.40:57493
+2021/02/06 14:50:48 connected to 192.168.30.50:25
+2021/02/06 14:50:48 <- 220 receiver ESMTP Postfix (Ubuntu)\r\n
+2021/02/06 14:50:48 -> EHLO sender\r\n
+2021/02/06 14:50:48 |< 250-receiver\r\n250-PIPELINING\r\n250-SIZE 10240000\r\n250-VRFY\r\n250-ETRN\r\n250-STARTTLS\r\n250-ENHANCEDSTATUSCODES\r\n250-8BITMIME\r\n250-DSN\r\n250-SMTPUTF8\r\n250 CHUNKING\r\n
+2021/02/06 14:50:48 <- 250-receiver\r\n250-PIPELINING\r\n250-SIZE 10240000\r\n250-VRFY\r\n250-ETRN\r\n250-ENHANCEDSTATUSCODES\r\n250-8BITMIME\r\n250-DSN\r\n250-SMTPUTF8\r\n250 CHUNKING\r\n
+2021/02/06 14:50:48 |> STARTTLS
+2021/02/06 14:50:48 >| MAIL FROM:<root@sender> SIZE=327\r\nRCPT TO:<root@receiver> ORCPT=rfc822;root@receiver\r\nDATA\r\n
+2021/02/06 14:50:48 |< 220 2.0.0 Ready to start TLS\r\n
+2021/02/06 14:50:48 |> EHLO receiver
+2021/02/06 14:50:48 pipe locked for tls connection
+2021/02/06 14:50:48 |< 250-receiver\r\n250-PIPELINING\r\n250-SIZE 10240000\r\n250-VRFY\r\n250-ETRN\r\n250-ENHANCEDSTATUSCODES\r\n250-8BITMIME\r\n250-DSN\r\n250-SMTPUTF8\r\n250 CHUNKING\r\n
+2021/02/06 14:50:48 tls connected, to pipe unlocked
+2021/02/06 14:50:48 -> MAIL FROM:<root@sender> SIZE=327\r\nRCPT TO:<root@receiver> ORCPT=rfc822;root@receiver\r\nDATA\r\n
+2021/02/06 14:50:48 <- 250 2.1.0 Ok\r\n250 2.1.5 Ok\r\n354 End data with <CR><LF>.<CR><LF>\r\n
+2021/02/06 14:50:48 -> Received: from sender (localhost [127.0.0.1])\r\n        by sender (Postfix) with SMTP id 45B113EA9B\r\n for <root@receiver>; Sat,  6 Feb 2021 14:50:48 +0000 (UTC)\r\nFrom: <root@sender>\r\nTo: <root@receiver>\r\nDate: Sat,  6 Feb 2021 14:50:48 +0000 (UTC)\r\nMessage-Id: <a77e.0003.0000@sender>\r\nSubject: Hi, Receiver from Sender\r\n\r\nXXXXXXXXXX\r\n.\r\nQUIT\r\n
+2021/02/06 14:50:48 <- 250 2.0.0 Ok: queued as 76DAD4113D\r\n221 2.0.0 Bye\r\n
+2021/02/06 14:50:48 connections closed
 ```
 
 Received mail on receiver:
