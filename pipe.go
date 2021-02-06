@@ -135,7 +135,7 @@ func (p *Pipe) copy(dr Direction, fn Mediator) (written int64, err error) {
 				continue
 			}
 			if dr == upstream {
-				log.Printf("-> %s", buf[0:nr])
+				log.Printf("-> %s", p.escapeCRLF(buf[0:nr]))
 			} else {
 				if bytes.Contains(buf, []byte(readyToStartTLS)) {
 					continue
@@ -195,11 +195,10 @@ func (p *Pipe) readReceiverConn() error {
 }
 
 func (p *Pipe) waitForTLSConn(b []byte, i int) {
-	log.Print("wait for tls connection")
+	log.Print("pipe locked for tls connection")
 	<-p.blocker
-	log.Print("tls connected")
+	log.Print("tls connected, to pipe unlocked")
 	p.locked = false
-	log.Printf("|> %s", b[0:i])
 }
 
 func (p *Pipe) connectTLS() error {
@@ -232,6 +231,6 @@ func (p *Pipe) close() func() {
 	return func() {
 		defer p.rConn.Close()
 		defer p.sConn.Close()
-		defer log.Print("connection closed")
+		defer log.Print("connections closed")
 	}
 }

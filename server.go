@@ -38,14 +38,13 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) HandleConnection(conn net.Conn) {
-	log.Print("new connection")
+	log.Printf("connected from %s", conn.RemoteAddr())
 
 	raddr, err := s.OriginalAddrDst(conn)
 	if err != nil {
 		log.Printf("original addr error: %#v", err)
 		return
 	}
-	log.Printf("remote addr: %s origin addr: %s", conn.RemoteAddr(), raddr)
 
 	laddr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:0", s.Addr))
 	if err != nil {
@@ -58,6 +57,7 @@ func (s *Server) HandleConnection(conn net.Conn) {
 		log.Printf("dial '%s' error: %#v", raddr, err)
 		return
 	}
+	log.Printf("connected to %s", raddr)
 
 	p := &Pipe{sConn: conn, rConn: dstConn}
 	p.Do()
