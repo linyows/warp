@@ -12,16 +12,16 @@ import (
 )
 
 type Pipe struct {
-	sConn      net.Conn
-	rConn      net.Conn
-	sMailAddr  []byte
-	rMailAddr  []byte
+	sConn       net.Conn
+	rConn       net.Conn
+	sMailAddr   []byte
+	rMailAddr   []byte
 	sServerName []byte
 	rServerName []byte
-	tls        bool
-	readytls   bool
-	locked     bool
-	blocker    chan interface{}
+	tls         bool
+	readytls    bool
+	locked      bool
+	blocker     chan interface{}
 }
 
 type Mediator func([]byte, int) ([]byte, int)
