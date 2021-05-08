@@ -16,6 +16,7 @@ type Pipe struct {
 	rConn      net.Conn
 	sMailAddr  []byte
 	rMailAddr  []byte
+	sServerName []byte
 	serverName []byte
 	tls        bool
 	readytls   bool
@@ -43,7 +44,7 @@ func (p *Pipe) Do() {
 
 	go func() {
 		_, err := p.copy(upstream, func(b []byte, i int) ([]byte, int) {
-			p.pairing(b)
+			p.pairing(b[0:i])
 			if !p.tls && p.readytls {
 				p.locked = true
 				p.starttls()
@@ -80,6 +81,9 @@ func (p *Pipe) Do() {
 }
 
 func (p *Pipe) pairing(b []byte) {
+	if bytes.Contains(b, []byte("EHLO")) {
+		p.sServerName = bytes.TrimSpace(bytes.Replace(b, []byte("EHLO"), []byte(""), 1))
+	}
 	if bytes.Contains(b, []byte(mailFromPrefix)) {
 		re := regexp.MustCompile(mailFromPrefix + mailRegex)
 		p.sMailAddr = bytes.Replace(re.Find(b), []byte(mailFromPrefix), []byte(""), 1)
@@ -177,7 +181,7 @@ func (p *Pipe) cmd(format string, args ...interface{}) error {
 }
 
 func (p *Pipe) ehlo() error {
-	return p.cmd("EHLO %s", p.serverName)
+	return p.cmd("EHLO %s", p.sServerName)
 }
 
 func (p *Pipe) starttls() error {
