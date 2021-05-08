@@ -17,7 +17,7 @@ type Pipe struct {
 	sMailAddr  []byte
 	rMailAddr  []byte
 	sServerName []byte
-	serverName []byte
+	rServerName []byte
 	tls        bool
 	readytls   bool
 	locked     bool
@@ -91,7 +91,7 @@ func (p *Pipe) pairing(b []byte) {
 	if bytes.Contains(b, []byte(rcptToPrefix)) {
 		re := regexp.MustCompile(rcptToPrefix + mailRegex)
 		p.rMailAddr = bytes.Replace(re.Find(b), []byte(rcptToPrefix), []byte(""), 1)
-		p.serverName = bytes.Split(p.rMailAddr, []byte("@"))[1]
+		p.rServerName = bytes.Split(p.rMailAddr, []byte("@"))[1]
 	}
 }
 
@@ -208,7 +208,7 @@ func (p *Pipe) waitForTLSConn(b []byte, i int) {
 func (p *Pipe) connectTLS() error {
 	p.rConn = tls.Client(p.rConn, &tls.Config{
 		InsecureSkipVerify: true,
-		ServerName:         string(p.serverName),
+		ServerName:         string(p.rServerName),
 	})
 
 	err := p.ehlo()
