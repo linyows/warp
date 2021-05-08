@@ -174,7 +174,7 @@ func (p *Pipe) copy(dr Direction, fn Mediator) (written int64, err error) {
 
 func (p *Pipe) cmd(format string, args ...interface{}) error {
 	cmd := fmt.Sprintf(format+crlf, args...)
-	log.Printf("|> %s", cmd)
+	log.Printf("|> %s", p.escapeCRLF([]byte(cmd)))
 	_, err := p.rConn.Write([]byte(cmd))
 	if err != nil {
 		return err
