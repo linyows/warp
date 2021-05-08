@@ -28,6 +28,8 @@ Usage
 To check the operation, use the sandbox environment with the Vagrantfile in the repository.
 
 ```sh
+warp master 🏄 make
+env GOOS=linux GOARCH=amd64 go build -o warp ./cmd/warp/main.go
 warp master 🏄 vagrant up
 ...
 warp master 🏄 vagrant status
