@@ -28,6 +28,8 @@ Usage
 To check the operation, use the sandbox environment with the Vagrantfile in the repository.
 
 ```sh
+warp master 🏄 make
+env GOOS=linux GOARCH=amd64 go build -o warp ./cmd/warp/main.go
 warp master 🏄 vagrant up
 ...
 warp master 🏄 vagrant status
@@ -61,10 +63,10 @@ Output by proxy on sender:
 2021/02/06 14:50:48 -> EHLO sender\r\n
 2021/02/06 14:50:48 |< 250-receiver\r\n250-PIPELINING\r\n250-SIZE 10240000\r\n250-VRFY\r\n250-ETRN\r\n250-STARTTLS\r\n250-ENHANCEDSTATUSCODES\r\n250-8BITMIME\r\n250-DSN\r\n250-SMTPUTF8\r\n250 CHUNKING\r\n
 2021/02/06 14:50:48 <- 250-receiver\r\n250-PIPELINING\r\n250-SIZE 10240000\r\n250-VRFY\r\n250-ETRN\r\n250-ENHANCEDSTATUSCODES\r\n250-8BITMIME\r\n250-DSN\r\n250-SMTPUTF8\r\n250 CHUNKING\r\n
-2021/02/06 14:50:48 |> STARTTLS
+2021/02/06 14:50:48 |> STARTTLS\r\n
 2021/02/06 14:50:48 >| MAIL FROM:<root@sender> SIZE=327\r\nRCPT TO:<root@receiver> ORCPT=rfc822;root@receiver\r\nDATA\r\n
 2021/02/06 14:50:48 |< 220 2.0.0 Ready to start TLS\r\n
-2021/02/06 14:50:48 |> EHLO receiver
+2021/02/06 14:50:48 |> EHLO sender\r\n
 2021/02/06 14:50:48 pipe locked for tls connection
 2021/02/06 14:50:48 |< 250-receiver\r\n250-PIPELINING\r\n250-SIZE 10240000\r\n250-VRFY\r\n250-ETRN\r\n250-ENHANCEDSTATUSCODES\r\n250-8BITMIME\r\n250-DSN\r\n250-SMTPUTF8\r\n250 CHUNKING\r\n
 2021/02/06 14:50:48 tls connected, to pipe unlocked

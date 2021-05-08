@@ -12,15 +12,16 @@ import (
 )
 
 type Pipe struct {
-	sConn      net.Conn
-	rConn      net.Conn
-	sMailAddr  []byte
-	rMailAddr  []byte
-	serverName []byte
-	tls        bool
-	readytls   bool
-	locked     bool
-	blocker    chan interface{}
+	sConn       net.Conn
+	rConn       net.Conn
+	sMailAddr   []byte
+	rMailAddr   []byte
+	sServerName []byte
+	rServerName []byte
+	tls         bool
+	readytls    bool
+	locked      bool
+	blocker     chan interface{}
 }
 
 type Mediator func([]byte, int) ([]byte, int)
@@ -43,7 +44,9 @@ func (p *Pipe) Do() {
 
 	go func() {
 		_, err := p.copy(upstream, func(b []byte, i int) ([]byte, int) {
-			p.pairing(b)
+			if !p.tls {
+				p.pairing(b[0:i])
+			}
 			if !p.tls && p.readytls {
 				p.locked = true
 				p.starttls()
@@ -80,6 +83,9 @@ func (p *Pipe) Do() {
 }
 
 func (p *Pipe) pairing(b []byte) {
+	if bytes.Contains(b, []byte("EHLO")) {
+		p.sServerName = bytes.TrimSpace(bytes.Replace(b, []byte("EHLO"), []byte(""), 1))
+	}
 	if bytes.Contains(b, []byte(mailFromPrefix)) {
 		re := regexp.MustCompile(mailFromPrefix + mailRegex)
 		p.sMailAddr = bytes.Replace(re.Find(b), []byte(mailFromPrefix), []byte(""), 1)
@@ -87,7 +93,7 @@ func (p *Pipe) pairing(b []byte) {
 	if bytes.Contains(b, []byte(rcptToPrefix)) {
 		re := regexp.MustCompile(rcptToPrefix + mailRegex)
 		p.rMailAddr = bytes.Replace(re.Find(b), []byte(rcptToPrefix), []byte(""), 1)
-		p.serverName = bytes.Split(p.rMailAddr, []byte("@"))[1]
+		p.rServerName = bytes.Split(p.rMailAddr, []byte("@"))[1]
 	}
 }
 
@@ -168,7 +174,7 @@ func (p *Pipe) copy(dr Direction, fn Mediator) (written int64, err error) {
 
 func (p *Pipe) cmd(format string, args ...interface{}) error {
 	cmd := fmt.Sprintf(format+crlf, args...)
-	log.Printf("|> %s", cmd)
+	log.Printf("|> %s", p.escapeCRLF([]byte(cmd)))
 	_, err := p.rConn.Write([]byte(cmd))
 	if err != nil {
 		return err
@@ -177,7 +183,7 @@ func (p *Pipe) cmd(format string, args ...interface{}) error {
 }
 
 func (p *Pipe) ehlo() error {
-	return p.cmd("EHLO %s", p.serverName)
+	return p.cmd("EHLO %s", p.sServerName)
 }
 
 func (p *Pipe) starttls() error {
@@ -204,7 +210,7 @@ func (p *Pipe) waitForTLSConn(b []byte, i int) {
 func (p *Pipe) connectTLS() error {
 	p.rConn = tls.Client(p.rConn, &tls.Config{
 		InsecureSkipVerify: true,
-		ServerName:         string(p.serverName),
+		ServerName:         string(p.rServerName),
 	})
 
 	err := p.ehlo()
