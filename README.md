@@ -1,5 +1,5 @@
 <br><br><br><br><br><br><p align="center">
-  <img alt="WARP" src="https://github.com/linyows/warp/blob/master/misc/warp.svg" width="200">
+  <img alt="WARP" src="https://github.com/linyows/warp/blob/main/misc/warp.svg" width="200">
 </p>
 <p align="center">
   <strong>WARP</strong> is an outbound <b>transparent</b> SMTP proxy.
@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://github.com/linyows/warp/actions" title="actions"><img src="https://img.shields.io/github/workflow/status/linyows/warp/Go?style=for-the-badge"></a>
   <a href="https://github.com/linyows/warp/releases"><img src="http://img.shields.io/github/release/linyows/warp.svg?style=for-the-badge" alt="GitHub Release"></a>
-  <a href="https://github.com/linyows/warp/blob/master/LICENSE"><img src="http://img.shields.io/badge/license-MIT-blue.svg?style=for-the-badge" alt="MIT License"></a>
+  <a href="https://github.com/linyows/warp/blob/main/LICENSE"><img src="http://img.shields.io/badge/license-MIT-blue.svg?style=for-the-badge" alt="MIT License"></a>
   <a href="http://godoc.org/github.com/linyows/warp"><img src="http://img.shields.io/badge/go-documentation-blue.svg?style=for-the-badge" alt="Go Docs"></a>
   <a href="https://codecov.io/gh/linyows/warp"> <img src="https://img.shields.io/codecov/c/github/linyows/warp.svg?style=for-the-badge" alt="codecov"></a>
 </p><br><br>
@@ -20,7 +20,7 @@ iptables -t nat -A OUTPUT -p tcp --dport 25 -j DNAT --to-destination <proxy-ip>:
 
 Also, the MTA and Proxy must be on the same host to know the DST Address before NAT.
 
-![Architecture](https://github.com/linyows/warp/blob/master/misc/architecture.png)
+![Architecture](https://github.com/linyows/warp/blob/main/misc/architecture.png)
 
 Usage
 --
@@ -28,11 +28,11 @@ Usage
 To check the operation, use the sandbox environment with the Vagrantfile in the repository.
 
 ```sh
-warp master 🏄 make
+warp main 🏄 make
 env GOOS=linux GOARCH=amd64 go build -o warp ./cmd/warp/main.go
-warp master 🏄 vagrant up
+warp main 🏄 vagrant up
 ...
-warp master 🏄 vagrant status
+warp main 🏄 vagrant status
 Current machine states:
 
 sender                    running (virtualbox)
@@ -42,7 +42,7 @@ receiver                  running (virtualbox)
 Start proxy on sender:
 
 ```sh
-warp master 🏄 vagrant ssh sender
+warp main 🏄 vagrant ssh sender
 vagrant@sender:~$ /vagrant/warp -ip 192.168.30.30 -port 10025
 2021/02/06 14:50:44 warp listens to 192.168.30.30:10025
 ```
@@ -50,7 +50,7 @@ vagrant@sender:~$ /vagrant/warp -ip 192.168.30.30 -port 10025
 Send mail on sender:
 
 ```sh
-warp master 🏄 vagrant ssh sender
+warp main 🏄 vagrant ssh sender
 vagrant@sender:~$ smtp-source -m 1 -s 1 -l 10 -S 'Hi, Receiver from Sender' -f root@sender -t root@receiver localhost:25
 ```
 
@@ -80,7 +80,7 @@ Output by proxy on sender:
 Received mail on receiver:
 
 ```sh
-warp master 🏄 vagrant ssh receiver
+warp main 🏄 vagrant ssh receiver
 vagrant@receiver:~$ sudo cat /var/spool/mail/root
 From root@sender  Fri Feb  5 16:00:41 2021
 Return-Path: <root@sender>
@@ -108,7 +108,7 @@ Contribution
 1. Fork ([https://github.com/linyows/warp/fork](https://github.com/linyows/warp/fork))
 1. Create a feature branch
 1. Commit your changes
-1. Rebase your local changes against the master branch
+1. Rebase your local changes against the main branch
 1. Run test suite with the `go test ./...` command and confirm that it passes
 1. Run `gofmt -s`
 1. Create a new Pull Request
