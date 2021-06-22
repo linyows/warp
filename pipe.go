@@ -235,8 +235,8 @@ func (p *Pipe) escapeCRLF(b []byte) []byte {
 
 func (p *Pipe) close() func() {
 	return func() {
-		defer p.rConn.Close()
 		defer p.sConn.Close()
+		defer p.rConn.Close()
 		defer log.Print("connections closed")
 	}
 }
