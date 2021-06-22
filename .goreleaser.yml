@@ -1,20 +1,30 @@
+before:
+  hooks:
+    - go mod tidy
 builds:
-  - main: ./cmd/warp
+  - id: 'warp'
+    main: ./cmd/warp
     env:
       - GO111MODULE=on
+      - CGO_ENABLED=0
     goos:
-      - darwin
       - linux
+      - windows
+      - darwin
     goarch:
       - amd64
+      - arm64
     ldflags:
       - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{ .CommitDate }} -X main.builtBy=goreleaser
 archives:
-  - name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+  - replacements:
+      386: i386
+      amd64: x86_64
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
     files:
       - none*
 checksum:
-  name_template: '{{ .ProjectName }}_checksums.txt'
+  name_template: 'checksums.txt'
 snapshot:
   name_template: "{{ .Tag }}-next"
 changelog:
