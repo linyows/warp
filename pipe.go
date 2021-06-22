@@ -129,6 +129,7 @@ func (p *Pipe) copy(dr Direction, fn Mediator) (written int64, err error) {
 		} else {
 			size = int(l.N)
 		}
+		log.Printf("io.Reader size: %d", size)
 	}
 	buf := make([]byte, bufferSize)
 
