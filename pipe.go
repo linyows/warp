@@ -49,7 +49,10 @@ func (p *Pipe) Do() {
 			}
 			if !p.tls && p.readytls {
 				p.locked = true
-				p.starttls()
+				er := p.starttls()
+				if er != nil {
+					log.Printf("upstream starttls error: %s", er.Error())
+				}
 				p.readytls = false
 				log.Printf(">| %s", p.escapeCRLF(b[0:i]))
 			}
@@ -71,7 +74,10 @@ func (p *Pipe) Do() {
 				p.readytls = true
 			} else if !p.tls && bytes.Contains(b, []byte(readyToStartTLS)) {
 				log.Printf("|< %s", p.escapeCRLF(b[0:i]))
-				p.connectTLS()
+				er := p.connectTLS()
+				if er != nil {
+					log.Printf("downstream connectTLS error: %s", er.Error())
+				}
 			}
 			return b, i
 		})
