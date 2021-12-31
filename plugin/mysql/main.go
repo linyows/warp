@@ -64,4 +64,4 @@ func (m *Mysql) AfterConn(d *warp.AfterConnData) {
 	}
 }
 
-var Hook Mysql //nolint:unused
+var Hook Mysql //nolint

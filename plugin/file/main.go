@@ -49,4 +49,4 @@ func (f *File) AfterConn(d *warp.AfterConnData) {
 	}
 }
 
-var Hook File //nolint:unused
+var Hook File //nolint
