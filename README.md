@@ -128,7 +128,7 @@ env GOOS=linux GOARCH=amd64 go build -o warp ./cmd/warp/main.go
 vagrant@sender:/vagrant$ /vagrant/warp -ip 192.168.30.30 -port 10025
 ```
 
-
+Run on vagrant:
 
 ```sql
 vagrant@sender:/vagrant$ sudo mysql -uroot -D warp
