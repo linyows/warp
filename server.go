@@ -5,16 +5,24 @@ import (
 	"log"
 	"net"
 	"syscall"
+	"time"
 )
 
 const SO_ORIGINAL_DST = 80
 
 type Server struct {
-	Addr string
-	Port int
+	Addr  string
+	Port  int
+	Hooks []Hook
 }
 
 func (s *Server) Start() error {
+	hooks, err := loadPlugins()
+	if err != nil {
+		return err
+	}
+	s.Hooks = hooks
+
 	addr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:%d", s.Addr, s.Port))
 	if err != nil {
 		return err
@@ -57,9 +65,37 @@ func (s *Server) HandleConnection(conn net.Conn) {
 		log.Printf("dial '%s' error: %#v", raddr, err)
 		return
 	}
-	log.Printf("connected to %s", raddr)
 
-	p := &Pipe{sConn: conn, rConn: dstConn}
+	p := &Pipe{
+		id:    GenID().String(),
+		sConn: conn,
+		rConn: dstConn,
+		rAddr: raddr,
+	}
+	p.afterCommHook = func(b Data, to Direction) {
+		now := time.Now()
+		log.Printf("[%s] %s %s %s", now.Format(TimeFormat), p.id, to, p.escapeCRLF(b))
+		for _, hook := range s.Hooks {
+			hook.AfterComm(&AfterCommData{
+				ConnID:     p.id,
+				OccurredAt: now,
+				Data:       p.escapeCRLF(b),
+				Direction:  to,
+			})
+		}
+	}
+	p.afterConnHook = func() {
+		now := time.Now()
+		log.Printf("[%s] %s from:%s to:%s", now.Format(TimeFormat), p.id, p.sMailAddr, p.rMailAddr)
+		for _, hook := range s.Hooks {
+			hook.AfterConn(&AfterConnData{
+				ConnID:     p.id,
+				OccurredAt: now,
+				MailFrom:   p.sMailAddr,
+				MailTo:     p.rMailAddr,
+			})
+		}
+	}
 	p.Do()
 }
 
