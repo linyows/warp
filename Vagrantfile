@@ -18,6 +18,10 @@ Vagrant.configure("2") do |config|
 
     apt-get install -y make golang
     # snap install go --classic
+
+    debconf-set-selections <<< "mysql-server mysql-server/root_password password "
+    debconf-set-selections <<< "mysql-server mysql-server/root_password_again password "
+    apt-get install -y mysql-server
   SHELL
   add_hosts = <<-SHELL
     echo "192.168.30.30 proxy" >> /etc/hosts
