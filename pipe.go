@@ -47,7 +47,7 @@ const (
 	srcToPxy Direction = ">|"
 	pxyToDst Direction = "|>"
 	dstToPxy Direction = "|<"
-	pxyToSrc Direction = "<|"
+	//pxyToSrc Direction = "<|"
 	srcToDst Direction = "->"
 	dstToSrc Direction = "<-"
 	onPxy    Direction = "--"
