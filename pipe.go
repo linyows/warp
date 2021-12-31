@@ -5,40 +5,60 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"regexp"
 	"sync"
 )
 
 type Pipe struct {
-	sConn       net.Conn
-	rConn       net.Conn
+	id    string
+	sConn net.Conn
+	rConn net.Conn
+
+	rAddr       *net.TCPAddr
 	sMailAddr   []byte
 	rMailAddr   []byte
 	sServerName []byte
 	rServerName []byte
-	tls         bool
-	readytls    bool
-	locked      bool
-	blocker     chan interface{}
+
+	tls      bool
+	readytls bool
+	locked   bool
+	blocker  chan interface{}
+
+	afterCommHook func(Data, Direction)
+	afterConnHook func()
 }
 
 type Mediator func([]byte, int) ([]byte, int)
-type Direction int
+type Flow int
+type Data []byte
+type Direction string
 
 const (
-	mailFromPrefix  string    = "MAIL FROM:<"
-	rcptToPrefix    string    = "RCPT TO:<"
-	mailRegex       string    = `[+A-z0-9.-]+@[A-z0-9.-]+`
-	bufferSize      int       = 32 * 1024
-	readyToStartTLS string    = "Ready to start TLS"
-	crlf            string    = "\r\n"
-	upstream        Direction = iota
+	mailFromPrefix  string = "MAIL FROM:<"
+	rcptToPrefix    string = "RCPT TO:<"
+	mailRegex       string = `[+A-z0-9.-]+@[A-z0-9.-]+`
+	bufferSize      int    = 32 * 1024
+	readyToStartTLS string = "Ready to start TLS"
+	crlf            string = "\r\n"
+	mailHeaderEnd   string = crlf + crlf
+
+	srcToPxy Direction = ">|"
+	pxyToDst Direction = "|>"
+	dstToPxy Direction = "|<"
+	//pxyToSrc Direction = "<|"
+	srcToDst Direction = "->"
+	dstToSrc Direction = "<-"
+	onPxy    Direction = "--"
+
+	upstream Flow = iota
 	downstream
 )
 
 func (p *Pipe) Do() {
+	go p.afterCommHook([]byte(fmt.Sprintf("connected to %s", p.rAddr)), onPxy)
+
 	var once sync.Once
 	p.blocker = make(chan interface{})
 
@@ -51,15 +71,15 @@ func (p *Pipe) Do() {
 				p.locked = true
 				er := p.starttls()
 				if er != nil {
-					log.Printf("upstream starttls error: %s", er.Error())
+					go p.afterCommHook([]byte(fmt.Sprintf("starttls error: %s", er.Error())), pxyToDst)
 				}
 				p.readytls = false
-				log.Printf(">| %s", p.escapeCRLF(b[0:i]))
+				go p.afterCommHook(b[0:i], srcToPxy)
 			}
 			return b, i
 		})
 		if err != nil {
-			log.Printf("upstream copy error: %s", err.Error())
+			go p.afterCommHook([]byte(fmt.Sprintf("io copy error: %s", err.Error())), pxyToDst)
 		}
 		once.Do(p.close())
 	}()
@@ -67,22 +87,22 @@ func (p *Pipe) Do() {
 	go func() {
 		_, err := p.copy(downstream, func(b []byte, i int) ([]byte, int) {
 			if !p.tls && bytes.Contains(b, []byte("STARTTLS")) {
-				log.Printf("|< %s", p.escapeCRLF(b[0:i]))
+				go p.afterCommHook(b[0:i], dstToPxy)
 				old := []byte("250-STARTTLS\r\n")
 				b = bytes.Replace(b, old, []byte(""), 1)
 				i = i - len(old)
 				p.readytls = true
 			} else if !p.tls && bytes.Contains(b, []byte(readyToStartTLS)) {
-				log.Printf("|< %s", p.escapeCRLF(b[0:i]))
+				go p.afterCommHook(b[0:i], dstToPxy)
 				er := p.connectTLS()
 				if er != nil {
-					log.Printf("downstream connectTLS error: %s", er.Error())
+					go p.afterCommHook([]byte(fmt.Sprintf("TLS connection error: %s", er.Error())), dstToPxy)
 				}
 			}
 			return b, i
 		})
 		if err != nil {
-			log.Printf("downstream copy error: %s", err.Error())
+			go p.afterCommHook([]byte(fmt.Sprintf("io copy error: %s", err.Error())), dstToPxy)
 		}
 		once.Do(p.close())
 	}()
@@ -103,21 +123,21 @@ func (p *Pipe) pairing(b []byte) {
 	}
 }
 
-func (p *Pipe) src(d Direction) net.Conn {
+func (p *Pipe) src(d Flow) net.Conn {
 	if d == upstream {
 		return p.sConn
 	}
 	return p.rConn
 }
 
-func (p *Pipe) dst(d Direction) net.Conn {
+func (p *Pipe) dst(d Flow) net.Conn {
 	if d == upstream {
 		return p.rConn
 	}
 	return p.sConn
 }
 
-func (p *Pipe) copy(dr Direction, fn Mediator) (written int64, err error) {
+func (p *Pipe) copy(dr Flow, fn Mediator) (written int64, err error) {
 	size := bufferSize
 	src, ok := p.src(dr).(io.Reader)
 	if !ok {
@@ -129,7 +149,7 @@ func (p *Pipe) copy(dr Direction, fn Mediator) (written int64, err error) {
 		} else {
 			size = int(l.N)
 		}
-		log.Printf("io.Reader size: %d", size)
+		go p.afterCommHook([]byte(fmt.Sprintf("io.Reader size: %d", size)), onPxy)
 	}
 	buf := make([]byte, bufferSize)
 
@@ -148,12 +168,12 @@ func (p *Pipe) copy(dr Direction, fn Mediator) (written int64, err error) {
 				continue
 			}
 			if dr == upstream {
-				log.Printf("-> %s", p.escapeCRLF(buf[0:nr]))
+				go p.afterCommHook(p.removeMailBody(buf[0:nr]), srcToDst)
 			} else {
 				if bytes.Contains(buf, []byte(readyToStartTLS)) {
 					continue
 				}
-				log.Printf("<- %s", p.escapeCRLF(buf[0:nr]))
+				go p.afterCommHook(buf[0:nr], dstToSrc)
 			}
 			nw, ew := p.dst(dr).Write(buf[0:nr])
 			if nw > 0 {
@@ -181,7 +201,7 @@ func (p *Pipe) copy(dr Direction, fn Mediator) (written int64, err error) {
 
 func (p *Pipe) cmd(format string, args ...interface{}) error {
 	cmd := fmt.Sprintf(format+crlf, args...)
-	log.Printf("|> %s", p.escapeCRLF([]byte(cmd)))
+	go p.afterCommHook([]byte(cmd), pxyToDst)
 	_, err := p.rConn.Write([]byte(cmd))
 	if err != nil {
 		return err
@@ -203,14 +223,14 @@ func (p *Pipe) readReceiverConn() error {
 	if err != nil {
 		return err
 	}
-	log.Printf("|< %s", p.escapeCRLF(buf[0:i]))
+	go p.afterCommHook(buf[0:i], dstToPxy)
 	return nil
 }
 
 func (p *Pipe) waitForTLSConn(b []byte, i int) {
-	log.Print("pipe locked for tls connection")
+	go p.afterCommHook([]byte("pipe locked for tls connection"), onPxy)
 	<-p.blocker
-	log.Print("tls connected, to pipe unlocked")
+	go p.afterCommHook([]byte("tls connected, to pipe unlocked"), onPxy)
 	p.locked = false
 }
 
@@ -242,8 +262,17 @@ func (p *Pipe) escapeCRLF(b []byte) []byte {
 
 func (p *Pipe) close() func() {
 	return func() {
-		defer p.sConn.Close()
-		defer p.rConn.Close()
-		defer log.Print("connections closed")
+		defer p.afterConnHook()
+		defer p.afterCommHook([]byte("connections closed"), onPxy)
+		p.rConn.Close()
+		p.sConn.Close()
 	}
+}
+
+func (p *Pipe) removeMailBody(b Data) Data {
+	i := bytes.Index(b, []byte(mailHeaderEnd))
+	if i == -1 {
+		return b
+	}
+	return b[:i]
 }

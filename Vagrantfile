@@ -15,6 +15,14 @@ Vagrant.configure("2") do |config|
     postconf -e smtp_host_lookup='native'
     postconf -e smtp_dns_support_level='disabled'
     systemctl restart postfix
+
+    apt-get install -y make golang
+    # snap install go --classic
+
+    debconf-set-selections <<< "mysql-server mysql-server/root_password password "
+    debconf-set-selections <<< "mysql-server mysql-server/root_password_again password "
+    apt-get install -y mysql-server
+    mysql -uroot < /vagrant/plugin/mysql/setup.sql
   SHELL
   add_hosts = <<-SHELL
     echo "192.168.30.30 proxy" >> /etc/hosts

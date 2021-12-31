@@ -102,6 +102,70 @@ XXXXXXXXXX
 
 ```
 
+Plugins
+--
+
+Warp outputs logs as stdout, but plugins can save logs to a database or a specified file.
+
+Native Plugins:
+
+- MySQL
+    ```sh
+    export DSN="warp:PASSWORD@tcp(localhost:3306)/warp"
+    ```
+- File
+    ```sh
+    export FILE_PATH="/tmp/warp.log"
+    ```
+
+```sh
+warp main 🏄 vagrant ssh sender
+vagrant@sender:~$ cd /vagrant
+vagrant@sender:/vagrant$ make plugin && make
+env GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build -buildmode=plugin -o .dist/mysql.so plugin/mysql/main.go
+env GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build -buildmode=plugin -o .dist/file.so plugin/file/main.go
+env GOOS=linux GOARCH=amd64 go build -o warp ./cmd/warp/main.go
+vagrant@sender:/vagrant$ /vagrant/warp -ip 192.168.30.30 -port 10025
+```
+
+Run on vagrant:
+
+```sql
+vagrant@sender:/vagrant$ sudo mysql -uroot -D warp
+mysql> select * from connections;
++----------------------------+-------------+---------------+----------------------------+
+| id                         | mail_from   | mail_to       | occurred_at                |
++----------------------------+-------------+---------------+----------------------------+
+| 01FR74VW574PVQ5WGYE5RQATTG | root@sender | root@receiver | 2021-12-31 02:24:56.009302 |
+| 01FR755XZKA594WA8SACQB4HC3 | root@sender | root@receiver | 2021-12-31 02:30:25.557302 |
++----------------------------+-------------+---------------+----------------------------+
+2 rows in set (0.00 sec)
+
+mysql> select communications.occurred_at, direction as d, substring(data, 1, 40) as data from communications, connections where connections.id = communications.connection_id and connections.id = "01FR755XZKA594WA8SACQB4HC3" order by communications.occurred_at;
++----------------------------+----+------------------------------------------+
+| occurred_at                | d  | data                                     |
++----------------------------+----+------------------------------------------+
+| 2021-12-31 02:30:25.523678 | -- | connected to 192.168.30.50:25            |
+| 2021-12-31 02:30:25.534128 | <- | 220 receiver ESMTP Postfix (Ubuntu)\r\n  |
+| 2021-12-31 02:30:25.534692 | -> | EHLO sender\r\n                          |
+| 2021-12-31 02:30:25.535251 | <- | 250-receiver\r\n250-PIPELINING\r\n250-SI |
+| 2021-12-31 02:30:25.535399 | |< | 250-receiver\r\n250-PIPELINING\r\n250-SI |
+| 2021-12-31 02:30:25.538790 | -- | pipe locked for tls connection           |
+| 2021-12-31 02:30:25.538791 | |> | STARTTLS\r\n                             |
+| 2021-12-31 02:30:25.538820 | >| | MAIL FROM:<root@sender> SIZE=327\r\nRCPT |
+| 2021-12-31 02:30:25.539568 | |< | 220 2.0.0 Ready to start TLS\r\n         |
+| 2021-12-31 02:30:25.539701 | |> | EHLO sender\r\n                          |
+| 2021-12-31 02:30:25.547124 | |< | 250-receiver\r\n250-PIPELINING\r\n250-SI |
+| 2021-12-31 02:30:25.547459 | -- | tls connected, to pipe unlocked          |
+| 2021-12-31 02:30:25.547811 | -> | MAIL FROM:<root@sender> SIZE=327\r\nRCPT |
+| 2021-12-31 02:30:25.554912 | <- | 250 2.1.0 Ok\r\n250 2.1.5 Ok\r\n354 End  |
+| 2021-12-31 02:30:25.555126 | -> | Received: from sender (localhost [127.0. |
+| 2021-12-31 02:30:25.556812 | <- | 250 2.0.0 Ok: queued as 1EA19412C8\r\n22 |
+| 2021-12-31 02:30:25.559877 | -- | connections closed                       |
++----------------------------+----+------------------------------------------+
+17 rows in set (0.00 sec)
+```
+
 Contribution
 --
 
