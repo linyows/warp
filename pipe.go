@@ -148,7 +148,7 @@ func (p *Pipe) copy(dr Direction, fn Mediator) (written int64, err error) {
 				continue
 			}
 			if dr == upstream {
-				log.Printf("-> %s", p.escapeCRLF(buf[0:nr]))
+				log.Printf("-> %s", p.removeMailBody(buf[0:nr]))
 			} else {
 				if bytes.Contains(buf, []byte(readyToStartTLS)) {
 					continue
@@ -246,4 +246,12 @@ func (p *Pipe) close() func() {
 		defer p.rConn.Close()
 		defer log.Print("connections closed")
 	}
+}
+
+func (p *Pipe) removeMailBody(b Data) Data {
+	i := bytes.Index(b, []byte(mailHeaderEnd))
+	if i == -1 {
+		return b
+	}
+	return b[:i]
 }
