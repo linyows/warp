@@ -22,6 +22,7 @@ Vagrant.configure("2") do |config|
     debconf-set-selections <<< "mysql-server mysql-server/root_password password "
     debconf-set-selections <<< "mysql-server mysql-server/root_password_again password "
     apt-get install -y mysql-server
+    mysql -uroot < /vagrant/plugin/mysql/setup.sql
   SHELL
   add_hosts = <<-SHELL
     echo "192.168.30.30 proxy" >> /etc/hosts
