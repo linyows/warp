@@ -1,7 +1,7 @@
 #include "bpf_helpers.h"
 
 #define TARGET_PORT 25
-#define REWRITE_IP 3232248325
+#define OVERRIDE_IP "192.168.30.30"
 
 // Ethernet header
 struct ethhdr {
@@ -56,43 +56,65 @@ struct tcphdr {
 SEC("xdp")
 int rewrite_ip(struct xdp_md *ctx)
 {
+  // read data
   void* data_end = (void*)(long)ctx->data_end;
   void* data = (void*)(long)ctx->data;
 
-  // L2
   struct ethhdr *ether = data;
+  // L2: frame header size
   if (data + sizeof(*ether) > data_end) {
     return XDP_ABORTED;
   }
 
-  // L3
-  if (ether->h_proto != 0x08) { // htons(ETH_P_IP) -> 0x08
-    // Non IPv4
+  // L3: non ipv4?
+  //if (ether->h_proto != htons(ETH_P_IP)) {
+  if (ether->h_proto != 0x08) {
     return XDP_PASS;
   }
   data += sizeof(*ether);
   struct iphdr *ip = data;
+  // ip header size
   if (data + sizeof(*ip) > data_end) {
     return XDP_ABORTED;
   }
 
-  // L4
-  if (ip->protocol != 0x06) {  // IPPROTO_TCP -> 6
-    // Non TCP
+  // L4: non tcp?
+  //if (ip->protocol != IPPROTO_TCP) {
+  if (ip->protocol != 0x06) {
     return XDP_PASS;
   }
   data += ip->ihl * 4;
   struct tcphdr *tcp = data;
+  // tcp header size
   if (data + sizeof(*tcp) > data_end) {
     return XDP_ABORTED;
   }
 
-
-  if (tcphdr->dest == SWAP_ORDER_16(TARGET_PORT)) {
-    // rewrite ip
-    tcphdr->daddr = htonl(REWRITE_IP);
-    // update checksum
+  // target ip?
+  unsigned long tip = htonl(inet_addr(OVERRIDE_IP)
+  if (ip->daddr == tip || ip->saddr == tip) {
+    return XDP_PASS;
   }
+
+  // non target port?
+  if (tcphdr->dest != htons(TARGET_PORT)) {
+    return XDP_PASS;
+  }
+
+  // override ip header
+  unsigned short old_daddr;
+  old_daddr = ntohs(*(unsigned short *)&ip->daddr);
+  ip->tos = 7 << 2;
+  ip->daddr = htonl(inet_addr(OVERRIDE_IP));
+  ip->check = 0;
+  ip->check = checksum((unsigned short *)ip, sizeof(struct iphdr));
+
+  // update tcp checksum
+  unsigned long sum;
+  sum = old_daddr + (~ntohs(*(unsigned short *)&ip->daddr) & 0xffff);
+  sum += ntohs(tcphdr->check);
+  sum = (sum & 0xffff) + (sum>>16);
+  tcphdr->check = htons(sum + (sum>>16) + 1);
 
   return XDP_PASS;
 }
