@@ -18,8 +18,9 @@ Vagrant.configure("2") do |config|
   SHELL
 
   setup_go = <<-SHELL
-    apt-get install -y make golang
-    # snap install go --classic
+    apt-get install -y make
+    # apt go is old with v1.13.x, so snap v1.17.x
+    snap install go --classic
   SHELL
 
   setup_mysql = <<-SHELL
