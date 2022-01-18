@@ -1,60 +1,47 @@
-#include "bpf_helpers.h"
+#include <linux/bpf.h>
+#include <arpa/inet.h>
+#include <bpf/bpf_helpers.h>
+#include <linux/if_ether.h>
+#include <linux/ip.h>
+//#include <linux/ipv6.h>
+#include <linux/tcp.h>
+//#include <linux/if_packet.h>
+//#include <linux/if_vlan.h>
 
 #define TARGET_PORT 25
-#define OVERRIDE_IP "192.168.30.30"
+#define OVERRIDE_IP 505325760 // 192.168.30.30
 
-// Ethernet header
-struct ethhdr {
-  __u8 h_dest[6];
-  __u8 h_source[6];
-  __u16 h_proto;
-} __attribute__((packed));
+static inline unsigned short checksum(unsigned short *buf, int bufsz)
+{
+  unsigned long sum = 0;
 
-// IPv4 header
-struct iphdr {
-  __u8 ihl : 4;
-  __u8 version : 4;
-  __u8 tos;
-  __u16 tot_len;
-  __u16 id;
-  __u16 frag_off;
-  __u8 ttl;
-  __u8 protocol;
-  __u16 check;
-  __u32 saddr;
-  __u32 daddr;
-} __attribute__((packed));
+  while (bufsz > 1) {
+    sum += *buf;
+    buf++;
+    bufsz -= 2;
+  }
 
-// TCP header
-struct tcphdr {
-  __u16 source;
-  __u16 dest;
-  __u32 seq;
-  __u32 ack_seq;
-  union {
-    struct {
-      // Field order has been converted LittleEndiand -> BigEndian
-      // in order to simplify flag checking (no need to ntohs())
-      __u16 ns : 1,
-      reserved : 3,
-      doff : 4,
-      fin : 1,
-      syn : 1,
-      rst : 1,
-      psh : 1,
-      ack : 1,
-      urg : 1,
-      ece : 1,
-      cwr : 1;
-    };
-  };
-  __u16 window;
-  __u16 check;
-  __u16 urg_ptr;
-};
+  if (bufsz == 1) {
+    sum += *(unsigned char *)buf;
+  }
 
-SEC("xdp")
-int rewrite_ip(struct xdp_md *ctx)
+  sum = (sum & 0xffff) + (sum >> 16);
+  sum = (sum & 0xffff) + (sum >> 16);
+
+  return ~sum;
+}
+
+/*
+ * Ethernet header
+ * https://github.com/torvalds/linux/blob/master/include/uapi/linux/if_ether.h#L169-L174
+ * IPv4 header
+ * https://github.com/torvalds/linux/blob/master/include/uapi/linux/ip.h#L86-L106
+ * TCP header
+ * https://github.com/torvalds/linux/blob/master/include/uapi/linux/tcp.h#L25-L58
+ */
+
+SEC("override_ip")
+int override_ip_func(struct xdp_md *ctx)
 {
   // read data
   void* data_end = (void*)(long)ctx->data_end;
@@ -67,8 +54,7 @@ int rewrite_ip(struct xdp_md *ctx)
   }
 
   // L3: non ipv4?
-  //if (ether->h_proto != htons(ETH_P_IP)) {
-  if (ether->h_proto != 0x08) {
+  if (ether->h_proto != htons(ETH_P_IP)) {
     return XDP_PASS;
   }
   data += sizeof(*ether);
@@ -79,8 +65,7 @@ int rewrite_ip(struct xdp_md *ctx)
   }
 
   // L4: non tcp?
-  //if (ip->protocol != IPPROTO_TCP) {
-  if (ip->protocol != 0x06) {
+  if (ip->protocol != IPPROTO_TCP) {
     return XDP_PASS;
   }
   data += ip->ihl * 4;
@@ -91,13 +76,13 @@ int rewrite_ip(struct xdp_md *ctx)
   }
 
   // target ip?
-  unsigned long tip = htonl(inet_addr(OVERRIDE_IP)
+  unsigned long tip = htonl(OVERRIDE_IP);
   if (ip->daddr == tip || ip->saddr == tip) {
     return XDP_PASS;
   }
 
   // non target port?
-  if (tcphdr->dest != htons(TARGET_PORT)) {
+  if (tcp->dest != htons(TARGET_PORT)) {
     return XDP_PASS;
   }
 
@@ -105,16 +90,16 @@ int rewrite_ip(struct xdp_md *ctx)
   unsigned short old_daddr;
   old_daddr = ntohs(*(unsigned short *)&ip->daddr);
   ip->tos = 7 << 2;
-  ip->daddr = htonl(inet_addr(OVERRIDE_IP));
+  ip->daddr = htonl(OVERRIDE_IP);
   ip->check = 0;
   ip->check = checksum((unsigned short *)ip, sizeof(struct iphdr));
 
   // update tcp checksum
   unsigned long sum;
   sum = old_daddr + (~ntohs(*(unsigned short *)&ip->daddr) & 0xffff);
-  sum += ntohs(tcphdr->check);
+  sum += ntohs(tcp->check);
   sum = (sum & 0xffff) + (sum>>16);
-  tcphdr->check = htons(sum + (sum>>16) + 1);
+  tcp->check = htons(sum + (sum>>16) + 1);
 
   return XDP_PASS;
 }
