@@ -41,6 +41,11 @@ func (s *Server) Start() error {
 			log.Printf("accept error: %#v", err)
 			continue
 		}
+		if s.Addr == fmt.Sprintf("%s", conn.RemoteAddr()) {
+			conn.Close()
+			log.Printf("closed connection due to same ip: %s", conn.RemoteAddr())
+			continue
+		}
 		go s.HandleConnection(conn)
 	}
 }
