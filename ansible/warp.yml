@@ -1,0 +1,52 @@
+---
+- hosts: warp
+  remote_user: root
+
+  tasks:
+  - name: apt update
+    apt:
+      update_cache: yes
+
+  - name: ensure postfix is at the latest version
+    apt:
+      name: postfix
+      state: latest
+  - name: write the postfix main config file
+    template:
+      src: ./etc/postfix/main.cf
+      dest: /etc/postfix/main.cf
+  - name: write the postfix master config file
+    template:
+      src: ./etc/postfix/master.cf
+      dest: /etc/postfix/master.cf
+
+  - name: ensure dovecot is at the latest version
+    apt:
+      name: "{{ package }}"
+      state: latest
+    vars:
+      package:
+        - dovecot-core
+        - dovecot-imapd
+        - dovecot-pop3d
+  - name: write the dovecot auth config file
+    template:
+      src: ./etc/dovecot/conf.d/10-auth.conf
+      dest: /etc/dovecot/conf.d/10-auth.conf
+  - name: write the dovecot mail config file
+    template:
+      src: ./etc/dovecot/conf.d/10-mail.conf
+      dest: /etc/dovecot/conf.d/10-mail.conf
+  - name: write the dovecot master config file
+    template:
+      src: ./etc/dovecot/conf.d/10-master.conf
+      dest: /etc/dovecot/conf.d/10-master.conf
+
+  - name: ensure mysql-server is at the latest version
+    apt:
+      name: mysql-server
+      state: latest
+  - name: ensure that mysql-server is started
+    service:
+      name: mysql-server
+      state: started
