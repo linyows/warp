@@ -1,4 +1,4 @@
 default: ansible-playbook
 
 ansible-playbook:
-	ansible-playbook -i inventory.yml warp.yml
+	ansible-playbook -l dev -i inventory.yml warp.yml
