@@ -7,6 +7,37 @@
     apt:
       update_cache: yes
 
+  # nginx
+  - name: ensure nginx and certbot is at the latest version
+    apt:
+      name: nginx
+      state: latest
+  - name: ensure that nginx is started
+    service:
+      name: nginx
+      state: started
+      enabled: yes
+
+  # certbot
+  - name: ensure certbot is at the latest version
+    apt:
+      name: "{{ package }}"
+      state: latest
+    vars:
+      package:
+        - certbot
+        - python3-certbot-ngnx
+    when: target == 'prod'
+  - name: obtains cert keys
+    command: certbot --nginx -d hngex.email -d www.hngex.email -d mx.hngex.email -m linyows@gmail.com --agree-tos --keep-until-expiring --non-interactive
+    when: target == 'prod'
+  - name: ensure that certbot.timer is started
+    service:
+      name: certbot.timer
+      state: started
+    when: target == 'prod'
+
+  # postfix
   - name: ensure postfix is at the latest version
     apt:
       name: postfix
@@ -19,7 +50,26 @@
     template:
       src: ./etc/postfix/master.cf
       dest: /etc/postfix/master.cf
+    notify:
+      - restart postfix
+  - name: ensure that postfix is started
+    service:
+      name: postfix
+      state: started
+      enabled: yes
 
+  # postsrsd
+  - name: ensure postsrsd is at the latest version
+    apt:
+      name: postsrsd
+      state: latest
+  - name: ensure that postsrsd is started
+    service:
+      name: postsrsd
+      state: started
+      enabled: yes
+
+  # dovecot
   - name: ensure dovecot is at the latest version
     apt:
       name: "{{ package }}"
@@ -29,6 +79,11 @@
         - dovecot-core
         - dovecot-imapd
         - dovecot-pop3d
+  - name: create users by doveadm
+    command: >
+      echo "{{ email1 }}:`doveadm pw -s CRAM-MD5 -p {{ pw1 }}`" >> /etc/dovecot/users
+      echo "{{ email2 }}:`doveadm pw -s CRAM-MD5 -p {{ pw2 }}`" >> /etc/dovecot/users
+    notify: restart dovecot
   - name: write the dovecot auth config file
     template:
       src: ./etc/dovecot/conf.d/10-auth.conf
@@ -41,12 +96,37 @@
     template:
       src: ./etc/dovecot/conf.d/10-master.conf
       dest: /etc/dovecot/conf.d/10-master.conf
+  - name: write the dovecot ssl config file
+    template:
+      src: ./etc/dovecot/conf.d/10-ssl.conf
+      dest: /etc/dovecot/conf.d/10-ssl.conf
+  - name: write the dovecot submission config file
+    template:
+      src: ./etc/dovecot/conf.d/20-submission.conf
+      dest: /etc/dovecot/conf.d/20-submission.conf
+  - name: write the dovecot passwdfile config file
+    template:
+      src: ./etc/dovecot/conf.d/auth-passwdfile.conf.ext
+      dest: /etc/dovecot/conf.d/auth-passwdfile.conf.ext
+  - name: write the dovecot static config file
+    template:
+      src: ./etc/dovecot/conf.d/auth-static.conf.ext
+      dest: /etc/dovecot/conf.d/auth-static.conf.ext
+    notify:
+      - restart dovecot
+  - name: ensure that dovecot is started
+    service:
+      name: dovecot
+      state: started
+      enabled: yes
 
+  # mysql
   - name: ensure mysql-server is at the latest version
     apt:
       name: mysql-server
       state: latest
-  - name: ensure that mysql-server is started
+  - name: ensure that mysql is started
     service:
-      name: mysql-server
+      name: mysql
       state: started
+      enabled: yes
