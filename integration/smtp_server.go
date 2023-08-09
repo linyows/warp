@@ -31,7 +31,7 @@ func SMTPServer() {
 
 func WaitForServerListen() {
 	host := ip + ":" + port
-	log.Print("Wait for port listen...")
+	fmt.Print("Wait for port listen...")
 	for {
 		timeout := time.Second
 		conn, err := net.DialTimeout("tcp", host, timeout)
@@ -39,11 +39,11 @@ func WaitForServerListen() {
 			fmt.Print(".")
 		}
 		if conn != nil {
+			fmt.Print("\n")
 			conn.Close()
 			break
 		}
 	}
-	fmt.Print("\n")
 }
 
 type SMTPConnection struct {
