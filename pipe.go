@@ -276,3 +276,31 @@ func (p *Pipe) removeMailBody(b Data) Data {
 	}
 	return b[:i]
 }
+
+func (p *Pipe) removeStartTLSCommand(b []byte, i int) ([]byte, int) {
+	lastLine := "250 STARTTLS" + crlf
+	intermediateLine := "250-STARTTLS" + crlf
+
+	if bytes.Contains(b, []byte(lastLine)) {
+		old := []byte(lastLine)
+		b = bytes.Replace(b, old, []byte(""), 1)
+		i = i - len(old)
+		p.readytls = true
+
+		arr := strings.Split(string(b), crlf)
+		num := len(arr) - 2
+		arr[num] = strings.Replace(arr[num], "250-", "250 ", 1)
+		b = []byte(strings.Join(arr, crlf))
+
+	} else if bytes.Contains(b, []byte(intermediateLine)) {
+		old := []byte(intermediateLine)
+		b = bytes.Replace(b, old, []byte(""), 1)
+		i = i - len(old)
+		p.readytls = true
+
+	} else {
+		go p.afterCommHook([]byte(fmt.Sprint("starttls replace error")), dstToPxy)
+	}
+
+	return b, i
+}
