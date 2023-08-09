@@ -299,7 +299,7 @@ func (p *Pipe) removeStartTLSCommand(b []byte, i int) ([]byte, int) {
 		p.readytls = true
 
 	} else {
-		go p.afterCommHook([]byte(fmt.Sprint("starttls replace error")), dstToPxy)
+		go p.afterCommHook([]byte("starttls replace error"), dstToPxy)
 	}
 
 	return b, i
