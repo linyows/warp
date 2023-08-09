@@ -35,8 +35,8 @@ func TestRemoveStartTLSCommand(t *testing.T) {
 		},
 	}
 
-	for _, v := range testcase {
-		pipe := &Pipe{readytls: false}
+	for _, v := range tests {
+		pipe := &Pipe{readytls: false, afterCommHook: func(b Data, to Direction) {}}
 		gotResp, gotSize := pipe.removeStartTLSCommand(v.ehloResp, v.ehloSize)
 		if string(v.expeResp) != string(gotResp) {
 			t.Errorf("response\nexpected:\n%sgot:\n%s", v.expeResp, gotResp)
