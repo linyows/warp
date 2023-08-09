@@ -131,7 +131,7 @@ func (c *SMTPConnection) handle(conn net.Conn) {
 			case "STARTTLS":
 				c.writeStringWithLog("220 2.0.0 Ready to start TLS")
 			default:
-				if c.data == false {
+				if !c.data {
 					c.writeStringWithLog("500 Command not recognized")
 				}
 			}
