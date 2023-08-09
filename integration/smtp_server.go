@@ -1,22 +1,50 @@
-package warp
+package integration
 
 import (
 	"bufio"
 	"fmt"
 	"log"
 	"net"
-	"net/smtp"
-	"os"
 	"strings"
-	"testing"
 	"time"
 )
 
-const (
-	ip       string = "127.0.0.1"
-	port     string = "10025"
-	hostname string = "example.local"
-)
+func SMTPServer() {
+	listener, err := net.Listen("tcp", ":"+port)
+	if err != nil {
+		log.Fatal("Listen error:", err)
+	}
+	defer listener.Close()
+
+	log.Printf("SMTP server is listening on :%s\n", port)
+
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			log.Println("Accept error:", err)
+			continue
+		}
+		c := &SMTPConnection{}
+		go c.handle(conn)
+	}
+}
+
+func WaitForServerListen() {
+	host := ip + ":" + port
+	log.Print("Wait for port listen...")
+	for {
+		timeout := time.Second
+		conn, err := net.DialTimeout("tcp", host, timeout)
+		if err != nil {
+			fmt.Print(".")
+		}
+		if conn != nil {
+			conn.Close()
+			break
+		}
+	}
+	fmt.Print("\n")
+}
 
 type SMTPConnection struct {
 	reader *bufio.Reader
@@ -110,91 +138,5 @@ func (c *SMTPConnection) handle(conn net.Conn) {
 		}
 
 		c.writer.Flush()
-	}
-}
-
-func listenServer() {
-	listener, err := net.Listen("tcp", ":"+port)
-	if err != nil {
-		log.Fatal("Listen error:", err)
-	}
-	defer listener.Close()
-
-	log.Printf("SMTP server is listening on :%s\n", port)
-
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			log.Println("Accept error:", err)
-			continue
-		}
-		c := &SMTPConnection{}
-		go c.handle(conn)
-	}
-}
-
-func waitForServerListen() {
-	host := ip + ":" + port
-	log.Print("Wait for port listen...")
-	for {
-		timeout := time.Second
-		conn, err := net.DialTimeout("tcp", host, timeout)
-		if err != nil {
-			fmt.Print(".")
-		}
-		if conn != nil {
-			conn.Close()
-			break
-		}
-	}
-	fmt.Print("\n")
-}
-
-func sendEmail() error {
-	c, err := smtp.Dial(ip + ":" + port)
-	if err != nil {
-		log.Println("smtp dial error")
-		return err
-	}
-	if err := c.Mail("alice@example.test"); err != nil {
-		log.Println("smtp mail error")
-		return err
-	}
-	if err := c.Rcpt("bob@example.local"); err != nil {
-		log.Println("smtp rcpt error")
-		return err
-	}
-	wc, err := c.Data()
-	if err != nil {
-		log.Println("smtp data error")
-		return err
-	}
-	_, err = fmt.Fprintf(wc, "This is the email body")
-	if err != nil {
-		log.Println("smtp data print error")
-		return err
-	}
-	if err = wc.Close(); err != nil {
-		log.Println("smtp close print error")
-		return err
-	}
-	if err = c.Quit(); err != nil {
-		log.Println("smtp quit error")
-		return err
-	}
-	return nil
-}
-
-func TestMain(m *testing.M) {
-	go listenServer()
-	waitForServerListen()
-	code := m.Run()
-	os.Exit(code)
-}
-
-func TestIntegration(t *testing.T) {
-	err := sendEmail()
-	if err != nil {
-		t.Errorf("raised error: %s", err)
 	}
 }
