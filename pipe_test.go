@@ -4,16 +4,14 @@ import (
 	"testing"
 )
 
-type RemoveStartTLSCommandTest struct {
-	ehloResp []byte
-	ehloSize int
-	expeResp []byte
-	expeSize int
-	expeTLS  bool
-}
-
 func TestRemoveStartTLSCommand(t *testing.T) {
-	var testcase = []RemoveStartTLSCommandTest{
+	var tests = []struct {
+		ehloResp []byte
+		ehloSize int
+		expeResp []byte
+		expeSize int
+		expeTLS  bool
+	}{
 		{
 			ehloResp: []byte("250-recipient@example.local\r\n250-PIPELINING\r\n250-SIZE 10240000\r\n250-VRFY\r\n250-ETRN\r\n250-STARTTLS\r\n250-ENHANCEDSTATUSCODES\r\n250-8BITMIME\r\n250-DSN\r\n250-SMTPUTF8\r\n250 CHUNKING\r\n"),
 			ehloSize: 174,
