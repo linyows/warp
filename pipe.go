@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"regexp"
+	"strings"
 	"sync"
 )
 
@@ -62,6 +63,7 @@ func (p *Pipe) Do() {
 	var once sync.Once
 	p.blocker = make(chan interface{})
 
+	// Proxy --- packet --> Destination
 	go func() {
 		_, err := p.copy(upstream, func(b []byte, i int) ([]byte, int) {
 			if !p.tls {
@@ -84,14 +86,12 @@ func (p *Pipe) Do() {
 		once.Do(p.close())
 	}()
 
+	// Proxy <--- packet -- Destination
 	go func() {
 		_, err := p.copy(downstream, func(b []byte, i int) ([]byte, int) {
 			if !p.tls && bytes.Contains(b, []byte("STARTTLS")) {
 				go p.afterCommHook(b[0:i], dstToPxy)
-				old := []byte("250-STARTTLS\r\n")
-				b = bytes.Replace(b, old, []byte(""), 1)
-				i = i - len(old)
-				p.readytls = true
+				b, i = p.removeStartTLSCommand(b, i)
 			} else if !p.tls && bytes.Contains(b, []byte(readyToStartTLS)) {
 				go p.afterCommHook(b[0:i], dstToPxy)
 				er := p.connectTLS()
