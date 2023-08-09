@@ -13,58 +13,44 @@ import (
 )
 
 const (
-	ip   string = "127.0.0.1"
-	port string = "10025"
+	ip       string = "127.0.0.1"
+	port     string = "10025"
+	hostname string = "example.local"
 )
 
-func sendEmail() error {
-	c, err := smtp.Dial(ip + ":" + port)
-	if err != nil {
-		return err
-	}
-	if err := c.Mail("sender@example.org"); err != nil {
-		return err
-	}
-	if err := c.Rcpt("recipient@example.net"); err != nil {
-		return err
-	}
-	wc, err := c.Data()
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintf(wc, "This is the email body")
-	if err != nil {
-		return err
-	}
-	if err = wc.Close(); err != nil {
-		return err
-	}
-	if err = c.Quit(); err != nil {
-		return err
-	}
-	return nil
+type SMTPConnection struct {
+	reader *bufio.Reader
+	writer *bufio.Writer
+	data   bool
 }
 
-func handleClient(conn net.Conn) {
+func (c *SMTPConnection) writeStringWithLog(str string) {
+	_, err := c.writer.WriteString(str + crlf)
+	if err != nil {
+		log.Printf("WriteString error: %#v", err)
+	}
+	log.Println(strings.ReplaceAll(str, crlf, "\\r\\n"))
+	//log.Println(str + crlf)
+}
+
+func (c *SMTPConnection) handle(conn net.Conn) {
 	defer conn.Close()
 
-	reader := bufio.NewReader(conn)
-	writer := bufio.NewWriter(conn)
-	hostname := "recipient"
+	c.reader = bufio.NewReader(conn)
+	c.writer = bufio.NewWriter(conn)
 
-	str := fmt.Sprintf("220 %s ESMTP Server (Go)", hostname)
-	writer.WriteString(str + crlf)
-	log.Println(str)
-	writer.Flush()
-	data := false
+	c.writeStringWithLog(fmt.Sprintf("220 %s ESMTP Server (Go)", hostname))
+	c.writer.Flush()
+	c.data = false
 
 	for {
-		line, err := reader.ReadString('\n')
+		line, err := c.reader.ReadString('\n')
 		if err != nil {
 			log.Println("already server port listen!")
 			return
 		}
 
+		log.Printf("<=== %s", line)
 		line = strings.TrimSpace(line)
 		parts := strings.Fields(line)
 		if len(parts) == 0 {
@@ -84,83 +70,46 @@ func handleClient(conn net.Conn) {
 			if len(parts) > 1 {
 				second = strings.ToUpper(parts[1])
 			}
-			log.Printf("<=== %s\n", v)
 
 			switch first {
-			case "HELO":
-				str := fmt.Sprintf("250 Hello %s", parts[1])
-				writer.WriteString(str + crlf)
-				log.Println(str)
 			case "EHLO":
-				str := fmt.Sprintf(`250-%s
-250-PIPELINING
-250-SIZE 10240000
-250-VRFY
-250-ETRN
-250-STARTTLS
-250-ENHANCEDSTATUSCODES
-250-8BITMIME
-250-DSN
-250-SMTPUTF8
-250 CHUNKING
-`, hostname)
-				str = strings.ReplaceAll(str, "\n", crlf)
-				writer.WriteString(str)
-				log.Println(strings.ReplaceAll(str, crlf, "\\r\\n"))
+				c.writeStringWithLog(fmt.Sprintf("250-%s\r\n250-PIPELINING\r\n250-SIZE 10240000\r\n250-STARTTLS\r\n250 8BITMIME", hostname))
+			case "HELO":
+				c.writeStringWithLog(fmt.Sprintf("250 Hello %s", parts[1]))
 			case "MAIL":
 				if strings.Contains(second, "FROM:") {
-					str := "250 2.1.0 Ok"
-					writer.WriteString(str + crlf)
-					log.Println(strings.ReplaceAll(str, crlf, "\\r\\n"))
+					c.writeStringWithLog("250 2.1.0 Ok")
 				}
 			case "RCPT":
-				str := "250 2.1.5 Ok"
 				if strings.Contains(second, "TO:") {
-					writer.WriteString(str + crlf)
-					log.Println(strings.ReplaceAll(str, crlf, "\\r\\n"))
+					c.writeStringWithLog("250 2.1.5 Ok")
 				}
 			case "DATA":
-				data = true
-				str := "354 End data with <CR><LF>.<CR><LF>"
-				writer.WriteString(str + crlf)
-				log.Println(strings.ReplaceAll(str, crlf, "\\r\\n"))
+				c.data = true
+				c.writeStringWithLog("354 End data with <CR><LF>.<CR><LF>")
 			case "QUIT":
-				str := "221 2.0.0 Bye"
-				writer.WriteString(str + crlf)
-				log.Println(str)
-				writer.Flush()
+				c.writeStringWithLog("221 2.0.0 Bye")
+				c.writer.Flush()
 				return
 			case ".":
-				data = false
-				str := "250 2.0.0 Ok: queued as 76DAD4113D"
-				writer.WriteString(str + crlf)
-				log.Println(str)
+				c.data = false
+				c.writeStringWithLog("250 2.0.0 Ok: queued as AAAAAAAAAA")
 			case "RSET":
-				str := "250 2.0.0 Ok"
-				writer.WriteString(str + crlf)
-				log.Println(str)
+				c.writeStringWithLog("250 2.0.0 Ok")
 			case "NOOP":
-				str := "250 2.0.0 Ok"
-				writer.WriteString(str + crlf)
-				log.Println(str)
+				c.writeStringWithLog("250 2.0.0 Ok")
 			case "VRFY":
-				str := "502 5.5.1 VRFY command is disabled"
-				writer.WriteString(str + crlf)
-				log.Println(str)
+				c.writeStringWithLog("502 5.5.1 VRFY command is disabled")
 			case "STARTTLS":
-				str := "220 2.0.0 Ready to start TLS"
-				writer.WriteString(str + crlf)
-				log.Println(str)
+				c.writeStringWithLog("220 2.0.0 Ready to start TLS")
 			default:
-				if data == false {
-					str := "500 Command not recognized"
-					writer.WriteString(str + crlf)
-					log.Println(str)
+				if c.data == false {
+					c.writeStringWithLog("500 Command not recognized")
 				}
 			}
 		}
 
-		writer.Flush()
+		c.writer.Flush()
 	}
 }
 
@@ -179,7 +128,8 @@ func listenServer() {
 			log.Println("Accept error:", err)
 			continue
 		}
-		go handleClient(conn)
+		c := &SMTPConnection{}
+		go c.handle(conn)
 	}
 }
 
@@ -198,6 +148,41 @@ func waitForServerListen() {
 		}
 	}
 	fmt.Print("\n")
+}
+
+func sendEmail() error {
+	c, err := smtp.Dial(ip + ":" + port)
+	if err != nil {
+		log.Println("smtp dial error")
+		return err
+	}
+	if err := c.Mail("alice@example.test"); err != nil {
+		log.Println("smtp mail error")
+		return err
+	}
+	if err := c.Rcpt("bob@example.local"); err != nil {
+		log.Println("smtp rcpt error")
+		return err
+	}
+	wc, err := c.Data()
+	if err != nil {
+		log.Println("smtp data error")
+		return err
+	}
+	_, err = fmt.Fprintf(wc, "This is the email body")
+	if err != nil {
+		log.Println("smtp data print error")
+		return err
+	}
+	if err = wc.Close(); err != nil {
+		log.Println("smtp close print error")
+		return err
+	}
+	if err = c.Quit(); err != nil {
+		log.Println("smtp quit error")
+		return err
+	}
+	return nil
 }
 
 func TestMain(m *testing.M) {
