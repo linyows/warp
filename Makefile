@@ -20,6 +20,9 @@ test:
 	go test $(TEST_OPTIONS) -failfast -race -coverpkg=./... -covermode=atomic \
 		-coverprofile=coverage.txt $(SOURCE_FILES) -run $(TEST_PATTERN) -timeout=5m
 
+integration:
+	cd integration && go test -v
+
 plugin:
 	env GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -buildmode=plugin -o plugin/mysql.so plugin/mysql/main.go
 	env GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -buildmode=plugin -o plugin/file.so plugin/file/main.go
@@ -33,4 +36,4 @@ dist:
 clean:
 	rm -rf plugin/*.so
 
-.PHONY: plugin
+.PHONY: plugin integration
