@@ -113,6 +113,9 @@ func (p *Pipe) Do() {
 }
 
 func (p *Pipe) pairing(b []byte) {
+	if bytes.Contains(b, []byte("HELO")) {
+		p.sServerName = bytes.TrimSpace(bytes.Replace(b, []byte("HELO"), []byte(""), 1))
+	}
 	if bytes.Contains(b, []byte("EHLO")) {
 		p.sServerName = bytes.TrimSpace(bytes.Replace(b, []byte("EHLO"), []byte(""), 1))
 	}
