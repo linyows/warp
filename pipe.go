@@ -272,6 +272,10 @@ func (p *Pipe) close() func() {
 	}
 }
 
+func (p *Pipe) isResponseOfEHLOWithStartTLS(b []byte) bool {
+	return !p.tls && !p.locked && bytes.Contains(b, []byte("STARTTLS"))
+}
+
 func (p *Pipe) isResponseOfReadyToStartTLS(b []byte) bool {
 	return !p.tls && p.locked && bytes.Contains(b, []byte(fmt.Sprint(codeServiceReady)))
 }

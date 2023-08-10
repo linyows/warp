@@ -4,6 +4,16 @@ import (
 	"testing"
 )
 
+func TestIsResponseOfEHLOWithStartTLS(t *testing.T) {
+	pipe := &Pipe{
+		tls:    false,
+		locked: false,
+	}
+	if !pipe.isResponseOfEHLOWithStartTLS([]byte("250-example.test\r\n250-PIPELINING\r\n250-8BITMIME\r\n250-SIZE 41943040\r\n250 STARTTLS\r\n")) {
+		t.Errorf("expected true, but got false")
+	}
+}
+
 func TestIsResponseOfReadyToStartTLS(t *testing.T) {
 	pipe := &Pipe{
 		tls:    false,
