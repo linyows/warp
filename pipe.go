@@ -92,7 +92,7 @@ func (p *Pipe) Do() {
 	// Proxy <--- packet -- Destination
 	go func() {
 		_, err := p.copy(downstream, func(b []byte, i int) ([]byte, int) {
-			if !p.tls && bytes.Contains(b, []byte("STARTTLS")) {
+			if p.isResponseOfEHLOWithStartTLS(b) {
 				go p.afterCommHook(b[0:i], dstToPxy)
 				b, i = p.removeStartTLSCommand(b, i)
 			} else if p.isResponseOfReadyToStartTLS(b) {
