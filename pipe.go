@@ -92,7 +92,7 @@ func (p *Pipe) Do() {
 			if !p.tls && bytes.Contains(b, []byte("STARTTLS")) {
 				go p.afterCommHook(b[0:i], dstToPxy)
 				b, i = p.removeStartTLSCommand(b, i)
-			} else if !p.tls && bytes.Contains(b, []byte(readyToStartTLS)) {
+			} else if p.isResponseOfReadyToStartTLS(b) {
 				go p.afterCommHook(b[0:i], dstToPxy)
 				er := p.connectTLS()
 				if er != nil {
@@ -170,7 +170,7 @@ func (p *Pipe) copy(dr Flow, fn Mediator) (written int64, err error) {
 			if dr == upstream {
 				go p.afterCommHook(p.removeMailBody(buf[0:nr]), srcToDst)
 			} else {
-				if bytes.Contains(buf, []byte(readyToStartTLS)) {
+				if p.isResponseOfReadyToStartTLS(buf) {
 					continue
 				}
 				go p.afterCommHook(buf[0:nr], dstToSrc)
