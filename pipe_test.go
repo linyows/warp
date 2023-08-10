@@ -4,6 +4,62 @@ import (
 	"testing"
 )
 
+func TestPairing(t *testing.T) {
+	var tests = []struct {
+		arg                  []byte
+		expectSenderServer   []byte
+		expectSenderAddr     []byte
+		expectReceiverServer []byte
+		expectReceiverAddr   []byte
+	}{
+		{
+			arg:                  []byte("EHLO mx.example.local\r\n"),
+			expectSenderServer:   []byte("mx.example.local"),
+			expectSenderAddr:     nil,
+			expectReceiverServer: nil,
+			expectReceiverAddr:   nil,
+		},
+		{
+			arg:                  []byte("MAIL FROM:<bob@example.local> SIZE=4095\r\n"),
+			expectSenderServer:   nil,
+			expectSenderAddr:     []byte("bob@example.local"),
+			expectReceiverServer: []byte(""),
+			expectReceiverAddr:   []byte(""),
+		},
+		{
+			arg:                  []byte("MAIL FROM:<SRS0=ZuTb=D3=example.test=alice@example.com> SIZE=4095\r\n"),
+			expectSenderServer:   nil,
+			expectSenderAddr:     []byte("SRS0=ZuTb=D3=example.test=alice@example.com"),
+			expectReceiverServer: nil,
+			expectReceiverAddr:   nil,
+		},
+		{
+			arg:                  []byte("RCPT TO:<alice@example.com>\r\n"),
+			expectSenderServer:   nil,
+			expectSenderAddr:     nil,
+			expectReceiverServer: []byte("example.com"),
+			expectReceiverAddr:   []byte("alice@example.com"),
+		},
+	}
+	for _, v := range tests {
+		pipe := &Pipe{afterCommHook: func(b Data, to Direction) {}}
+		pipe.pairing(v.arg)
+
+		if v.expectSenderServer != nil && string(v.expectSenderServer) != string(pipe.sServerName) {
+			t.Errorf("sender server name expected %s, but got %s", v.expectSenderServer, pipe.sServerName)
+		}
+		if v.expectSenderAddr != nil && string(v.expectSenderAddr) != string(pipe.sMailAddr) {
+			t.Errorf("sender email address expected %s, but got %s", v.expectSenderAddr, pipe.sMailAddr)
+		}
+		if v.expectReceiverServer != nil && string(v.expectReceiverServer) != string(pipe.rServerName) {
+			t.Errorf("receiver server name expected %s, but got %s", v.expectReceiverServer, pipe.rServerName)
+		}
+		if v.expectReceiverAddr != nil && string(v.expectReceiverAddr) != string(pipe.rMailAddr) {
+			t.Errorf("receiver email address expected %s, but got %s", v.expectReceiverAddr, pipe.rMailAddr)
+		}
+	}
+}
+
 func TestIsResponseOfEHLOWithStartTLS(t *testing.T) {
 	pipe := &Pipe{
 		tls:    false,
