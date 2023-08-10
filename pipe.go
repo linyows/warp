@@ -37,13 +37,12 @@ type Data []byte
 type Direction string
 
 const (
-	mailFromPrefix  string = "MAIL FROM:<"
-	rcptToPrefix    string = "RCPT TO:<"
-	mailRegex       string = `[+A-z0-9.-]+@[A-z0-9.-]+`
-	bufferSize      int    = 32 * 1024
-	readyToStartTLS string = "Ready to start TLS"
-	crlf            string = "\r\n"
-	mailHeaderEnd   string = crlf + crlf
+	mailFromPrefix string = "MAIL FROM:<"
+	rcptToPrefix   string = "RCPT TO:<"
+	mailRegex      string = `[+A-z0-9.-=]+@[A-z0-9.-]+`
+	bufferSize     int    = 32 * 1024
+	crlf           string = "\r\n"
+	mailHeaderEnd  string = crlf + crlf
 
 	srcToPxy Direction = ">|"
 	pxyToDst Direction = "|>"
@@ -55,6 +54,10 @@ const (
 
 	upstream Flow = iota
 	downstream
+
+	// SMTP response codes
+	codeServiceReady int = 220
+	//codeActionCompleted int = 250
 )
 
 func (p *Pipe) Do() {
@@ -80,7 +83,7 @@ func (p *Pipe) Do() {
 			}
 			return b, i
 		})
-		if err != nil {
+		if err != nil && err != net.ErrClosed {
 			go p.afterCommHook([]byte(fmt.Sprintf("io copy error: %s", err.Error())), pxyToDst)
 		}
 		once.Do(p.close())
@@ -89,10 +92,10 @@ func (p *Pipe) Do() {
 	// Proxy <--- packet -- Destination
 	go func() {
 		_, err := p.copy(downstream, func(b []byte, i int) ([]byte, int) {
-			if !p.tls && bytes.Contains(b, []byte("STARTTLS")) {
+			if p.isResponseOfEHLOWithStartTLS(b) {
 				go p.afterCommHook(b[0:i], dstToPxy)
 				b, i = p.removeStartTLSCommand(b, i)
-			} else if !p.tls && bytes.Contains(b, []byte(readyToStartTLS)) {
+			} else if p.isResponseOfReadyToStartTLS(b) {
 				go p.afterCommHook(b[0:i], dstToPxy)
 				er := p.connectTLS()
 				if er != nil {
@@ -101,7 +104,8 @@ func (p *Pipe) Do() {
 			}
 			return b, i
 		})
-		if err != nil {
+		//if err != nil && !strings.Contains(err.Error(), "use of closed network connection") {
+		if err != nil && err != net.ErrClosed {
 			go p.afterCommHook([]byte(fmt.Sprintf("io copy error: %s", err.Error())), dstToPxy)
 		}
 		once.Do(p.close())
@@ -109,6 +113,9 @@ func (p *Pipe) Do() {
 }
 
 func (p *Pipe) pairing(b []byte) {
+	if bytes.Contains(b, []byte("HELO")) {
+		p.sServerName = bytes.TrimSpace(bytes.Replace(b, []byte("HELO"), []byte(""), 1))
+	}
 	if bytes.Contains(b, []byte("EHLO")) {
 		p.sServerName = bytes.TrimSpace(bytes.Replace(b, []byte("EHLO"), []byte(""), 1))
 	}
@@ -170,7 +177,7 @@ func (p *Pipe) copy(dr Flow, fn Mediator) (written int64, err error) {
 			if dr == upstream {
 				go p.afterCommHook(p.removeMailBody(buf[0:nr]), srcToDst)
 			} else {
-				if bytes.Contains(buf, []byte(readyToStartTLS)) {
+				if p.isResponseOfReadyToStartTLS(buf) {
 					continue
 				}
 				go p.afterCommHook(buf[0:nr], dstToSrc)
@@ -267,6 +274,14 @@ func (p *Pipe) close() func() {
 		p.rConn.Close()
 		p.sConn.Close()
 	}
+}
+
+func (p *Pipe) isResponseOfEHLOWithStartTLS(b []byte) bool {
+	return !p.tls && !p.locked && bytes.Contains(b, []byte("STARTTLS"))
+}
+
+func (p *Pipe) isResponseOfReadyToStartTLS(b []byte) bool {
+	return !p.tls && p.locked && bytes.Contains(b, []byte(fmt.Sprint(codeServiceReady)))
 }
 
 func (p *Pipe) removeMailBody(b Data) Data {
