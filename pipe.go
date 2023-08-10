@@ -37,13 +37,12 @@ type Data []byte
 type Direction string
 
 const (
-	mailFromPrefix  string = "MAIL FROM:<"
-	rcptToPrefix    string = "RCPT TO:<"
-	mailRegex       string = `[+A-z0-9.-]+@[A-z0-9.-]+`
-	bufferSize      int    = 32 * 1024
-	readyToStartTLS string = "Ready to start TLS"
-	crlf            string = "\r\n"
-	mailHeaderEnd   string = crlf + crlf
+	mailFromPrefix string = "MAIL FROM:<"
+	rcptToPrefix   string = "RCPT TO:<"
+	mailRegex      string = `[+A-z0-9.-=]+@[A-z0-9.-]+`
+	bufferSize     int    = 32 * 1024
+	crlf           string = "\r\n"
+	mailHeaderEnd  string = crlf + crlf
 
 	srcToPxy Direction = ">|"
 	pxyToDst Direction = "|>"
@@ -55,6 +54,10 @@ const (
 
 	upstream Flow = iota
 	downstream
+
+	// SMTP response codes
+	codeServiceReady int = 220
+	//codeActionCompleted int = 250
 )
 
 func (p *Pipe) Do() {
