@@ -269,6 +269,10 @@ func (p *Pipe) close() func() {
 	}
 }
 
+func (p *Pipe) isResponseOfReadyToStartTLS(b []byte) bool {
+	return !p.tls && p.locked && bytes.Contains(b, []byte(fmt.Sprint(codeServiceReady)))
+}
+
 func (p *Pipe) removeMailBody(b Data) Data {
 	i := bytes.Index(b, []byte(mailHeaderEnd))
 	if i == -1 {

@@ -4,6 +4,16 @@ import (
 	"testing"
 )
 
+func TestIsResponseOfReadyToStartTLS(t *testing.T) {
+	pipe := &Pipe{
+		tls:    false,
+		locked: true,
+	}
+	if !pipe.isResponseOfReadyToStartTLS([]byte("220 2.0.0 SMTP server ready\r\n")) {
+		t.Errorf("expected true, but got false")
+	}
+}
+
 func TestRemoveStartTLSCommand(t *testing.T) {
 	var tests = []struct {
 		ehloResp []byte
