@@ -69,7 +69,7 @@ func (p *Pipe) Do() {
 	// Sender --- packet --> Proxy
 	go func() {
 		_, err := p.copy(upstream, func(b []byte, i int) ([]byte, int) {
-			if !p.tls {
+			if !p.tls || p.rMailAddr == nil {
 				p.pairing(b[0:i])
 			}
 			if !p.tls && p.readytls {
