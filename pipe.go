@@ -39,7 +39,7 @@ type Direction string
 const (
 	mailFromPrefix string = "MAIL FROM:<"
 	rcptToPrefix   string = "RCPT TO:<"
-	mailRegex      string = `[+A-z0-9.-=]+@[A-z0-9.-]+`
+	mailRegex      string = `[+A-z0-9.\-=]+@[A-z0-9.\-]+`
 	bufferSize     int    = 32 * 1024
 	crlf           string = "\r\n"
 	mailHeaderEnd  string = crlf + crlf
@@ -66,10 +66,10 @@ func (p *Pipe) Do() {
 	var once sync.Once
 	p.blocker = make(chan interface{})
 
-	// Proxy --- packet --> Destination
+	// Sender --- packet --> Proxy
 	go func() {
 		_, err := p.copy(upstream, func(b []byte, i int) ([]byte, int) {
-			if !p.tls {
+			if !p.tls || p.rMailAddr == nil {
 				p.pairing(b[0:i])
 			}
 			if !p.tls && p.readytls {
@@ -83,13 +83,13 @@ func (p *Pipe) Do() {
 			}
 			return b, i
 		})
-		if err != nil && err != net.ErrClosed {
+		if err != nil && !strings.Contains(err.Error(), "use of closed network connection") {
 			go p.afterCommHook([]byte(fmt.Sprintf("io copy error: %s", err.Error())), pxyToDst)
 		}
 		once.Do(p.close())
 	}()
 
-	// Proxy <--- packet -- Destination
+	// Proxy <--- packet -- Receiver
 	go func() {
 		_, err := p.copy(downstream, func(b []byte, i int) ([]byte, int) {
 			if p.isResponseOfEHLOWithStartTLS(b) {
@@ -104,8 +104,7 @@ func (p *Pipe) Do() {
 			}
 			return b, i
 		})
-		//if err != nil && !strings.Contains(err.Error(), "use of closed network connection") {
-		if err != nil && err != net.ErrClosed {
+		if err != nil && !strings.Contains(err.Error(), "use of closed network connection") {
 			go p.afterCommHook([]byte(fmt.Sprintf("io copy error: %s", err.Error())), dstToPxy)
 		}
 		once.Do(p.close())
@@ -177,7 +176,8 @@ func (p *Pipe) copy(dr Flow, fn Mediator) (written int64, err error) {
 			if dr == upstream {
 				go p.afterCommHook(p.removeMailBody(buf[0:nr]), srcToDst)
 			} else {
-				if p.isResponseOfReadyToStartTLS(buf) {
+				// remove buffering ready response
+				if bytes.Contains(buf, []byte("Ready to start TLS")) || bytes.Contains(buf, []byte("SMTP server ready")) || bytes.Contains(buf, []byte("Start TLS")) {
 					continue
 				}
 				go p.afterCommHook(buf[0:nr], dstToSrc)

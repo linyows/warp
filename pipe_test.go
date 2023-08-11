@@ -27,9 +27,9 @@ func TestPairing(t *testing.T) {
 			expectReceiverAddr:   nil,
 		},
 		{
-			arg:                  []byte("MAIL FROM:<bob@example.local> SIZE=4095\r\n"),
+			arg:                  []byte("MAIL FROM:<b-ob+foo@e-xample.local> SIZE=4095\r\n"),
 			expectSenderServer:   nil,
-			expectSenderAddr:     []byte("bob@example.local"),
+			expectSenderAddr:     []byte("b-ob+foo@e-xample.local"),
 			expectReceiverServer: nil,
 			expectReceiverAddr:   nil,
 		},
