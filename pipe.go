@@ -39,7 +39,7 @@ type Direction string
 const (
 	mailFromPrefix string = "MAIL FROM:<"
 	rcptToPrefix   string = "RCPT TO:<"
-	mailRegex      string = `[+A-z0-9.-=]+@[A-z0-9.-]+`
+	mailRegex      string = `[+A-z0-9.\-=]+@[A-z0-9.\-]+`
 	bufferSize     int    = 32 * 1024
 	crlf           string = "\r\n"
 	mailHeaderEnd  string = crlf + crlf
