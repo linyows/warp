@@ -66,7 +66,7 @@ func (p *Pipe) Do() {
 	var once sync.Once
 	p.blocker = make(chan interface{})
 
-	// Proxy --- packet --> Destination
+	// Sender --- packet --> Proxy
 	go func() {
 		_, err := p.copy(upstream, func(b []byte, i int) ([]byte, int) {
 			if !p.tls {
@@ -89,7 +89,7 @@ func (p *Pipe) Do() {
 		once.Do(p.close())
 	}()
 
-	// Proxy <--- packet -- Destination
+	// Proxy <--- packet -- Receiver
 	go func() {
 		_, err := p.copy(downstream, func(b []byte, i int) ([]byte, int) {
 			if p.isResponseOfEHLOWithStartTLS(b) {
