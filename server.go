@@ -52,10 +52,11 @@ func (s *Server) Start() error {
 
 func (s *Server) HandleConnection(conn net.Conn) {
 	uuid := GenID().String()
+	log.Printf("[%s] %s %s connected from %s", time.Now().Format(TimeFormat), uuid, onPxy, conn.RemoteAddr())
 
 	raddr, err := s.OriginalAddrDst(conn)
 	if err != nil {
-		log.Printf("original addr error: %#v", err)
+		log.Printf("[%s] %s %s original addr error: %#v", time.Now().Format(TimeFormat), uuid, onPxy, err)
 		return
 	}
 
@@ -75,13 +76,13 @@ func (s *Server) HandleConnection(conn net.Conn) {
 
 	laddr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:0", s.Addr))
 	if err != nil {
-		log.Printf("resolve tcp addr error: %#v", err)
+		log.Printf("[%s] %s %s resolve tcp addr error: %#v", time.Now().Format(TimeFormat), uuid, onPxy, err)
 		return
 	}
 	dialer := &net.Dialer{LocalAddr: laddr}
 	dstConn, err := dialer.Dial("tcp", raddr.String())
 	if err != nil {
-		log.Printf("dial '%s' error: %#v", raddr, err)
+		log.Printf("[%s] %s %s dial `%s` error: %#v", time.Now().Format(TimeFormat), uuid, onPxy, raddr, err)
 		return
 	}
 
