@@ -51,13 +51,27 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) HandleConnection(conn net.Conn) {
-	log.Printf("connected from %s", conn.RemoteAddr())
+	uuid := GenID().String()
 
 	raddr, err := s.OriginalAddrDst(conn)
 	if err != nil {
 		log.Printf("original addr error: %#v", err)
 		return
 	}
+
+	go func() {
+		now := time.Now()
+		b := []byte(fmt.Sprintf("connecting to %s", raddr))
+		log.Printf("[%s] %s %s %s", now.Format(TimeFormat), uuid, onPxy, b)
+		for _, hook := range s.Hooks {
+			hook.AfterComm(&AfterCommData{
+				ConnID:     uuid,
+				OccurredAt: now,
+				Data:       b,
+				Direction:  onPxy,
+			})
+		}
+	}()
 
 	laddr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:0", s.Addr))
 	if err != nil {
@@ -72,7 +86,7 @@ func (s *Server) HandleConnection(conn net.Conn) {
 	}
 
 	p := &Pipe{
-		id:    GenID().String(),
+		id:    uuid,
 		sConn: conn,
 		rConn: dstConn,
 		rAddr: raddr,
