@@ -42,9 +42,9 @@ func TestPairing(t *testing.T) {
 		},
 		{
 			// Sender Rewriting Scheme
-			arg:                  []byte("MAIL FROM:<SRS0=ZuTb=D3=example.test=alice@example.com> SIZE=4095\r\n"),
+			arg:                  []byte("MAIL FROM:<SRS0=x/Eg=D3=example.test=alice@example.com> SIZE=4095\r\n"),
 			expectSenderServer:   nil,
-			expectSenderAddr:     []byte("SRS0=ZuTb=D3=example.test=alice@example.com"),
+			expectSenderAddr:     []byte("SRS0=x/Eg=D3=example.test=alice@example.com"),
 			expectReceiverServer: nil,
 			expectReceiverAddr:   nil,
 		},
