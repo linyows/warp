@@ -83,7 +83,7 @@ func (p *Pipe) Do() {
 			}
 			return b, i
 		})
-		if err != nil && !strings.Contains(err.Error(), "use of closed network connection") {
+		if err != nil {
 			go p.afterCommHook([]byte(fmt.Sprintf("io copy error: %s", err.Error())), pxyToDst)
 		}
 		once.Do(p.close())
@@ -104,7 +104,7 @@ func (p *Pipe) Do() {
 			}
 			return b, i
 		})
-		if err != nil && !strings.Contains(err.Error(), "use of closed network connection") {
+		if err != nil {
 			go p.afterCommHook([]byte(fmt.Sprintf("io copy error: %s", err.Error())), dstToPxy)
 		}
 		once.Do(p.close())
