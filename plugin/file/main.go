@@ -18,7 +18,7 @@ const (
 )
 
 type File struct {
-	file *os.File
+	file io.Writer
 }
 
 func (f *File) writer() (io.Writer, error) {
