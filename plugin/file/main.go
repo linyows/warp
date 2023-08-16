@@ -26,7 +26,7 @@ func (f *File) writer() (io.Writer, error) {
 
 	path := os.Getenv("FILE_PATH")
 	if len(path) == 0 {
-		return nil, fmt.Error("missing path for file, please set `FILE_PATH`")
+		return nil, fmt.Errorf("missing path for file, please set `FILE_PATH`")
 	}
 
 	var err error
