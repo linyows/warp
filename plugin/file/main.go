@@ -11,8 +11,10 @@ import (
 
 const (
 	prefix   string = "file-plugin"
-	commJson string = "{\"type\":\"comm\",\"occurred_at\":\"%s\",\"connection_id\":\"%s\",\"direction\":\"%s\",\"data\":\"%s\"}\n"
-	connJson string = "{\"type\":\"conn\"\"occurred_at\":\"%s\",\"connection_id\":\"%s\",\"from\":\"%s\",\"to\":\"%s\",\"elapse\":\"%s\"\n}"
+	commJson string = `{"type":"comm","occurred_at":"%s","connection_id":"%s","direction":"%s","data":"%s"}
+`
+	connJson string = `{"type":"conn","occurred_at":"%s","connection_id":"%s","from":"%s","to":"%s","elapse":"%s"}
+`
 )
 
 type File struct {
