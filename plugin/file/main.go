@@ -12,7 +12,7 @@ import (
 const (
 	prefix   string = "file-plugin"
 	commJson string = "{\"type\":\"comm\",\"occurred_at\":\"%s\",\"connection_id\":\"%s\",\"direction\":\"%s\",\"data\":\"%s\"}\n"
-	connJson string = "{\"type\":\"conn\"\"occurred_at\":\"%s\",\"connection_id\":\"%s\",\"from\":\"%s\",\"to\":\"%s\",\"elapsed\":\"%s\"\n}"
+	connJson string = "{\"type\":\"conn\"\"occurred_at\":\"%s\",\"connection_id\":\"%s\",\"from\":\"%s\",\"to\":\"%s\",\"elapse\":\"%s\"\n}"
 )
 
 type File struct {
@@ -57,7 +57,7 @@ func (f *File) AfterConn(d *warp.AfterConnData) {
 		return
 	}
 
-	if _, err := fmt.Fprintf(writer, connJson, d.OccurredAt.Format(time.RFC3339), d.ConnID, d.MailFrom, d.MailTo, d.ElapsedSeconds); err != nil {
+	if _, err := fmt.Fprintf(writer, connJson, d.OccurredAt.Format(time.RFC3339), d.ConnID, d.MailFrom, d.MailTo, d.Elapse); err != nil {
 		fmt.Printf("[%s] file append error: %#v\n", prefix, err)
 	}
 }

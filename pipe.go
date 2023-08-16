@@ -66,12 +66,12 @@ const (
 	//codeActionCompleted int = 250
 )
 
-type ElapsedSeconds struct {
+type Elapse struct {
 	Float64 float64
 	Valid   bool
 }
 
-func (e ElapsedSeconds) String() string {
+func (e Elapse) String() string {
 	if !e.Valid {
 		return "nil"
 	}
@@ -343,16 +343,16 @@ func (p *Pipe) removeStartTLSCommand(b []byte, i int) ([]byte, int) {
 	return b, i
 }
 
-func (p *Pipe) elapsedSeconds() ElapsedSeconds {
+func (p *Pipe) elapse() Elapse {
 	if p.timeAtDataStarting.IsZero() {
 		log.Print("time at data starting is zero")
-		return ElapsedSeconds{Valid: false}
+		return Elapse{Valid: false}
 	}
 	if p.timeAtConnected.IsZero() {
 		log.Print("time at connected is zero")
-		return ElapsedSeconds{Valid: false}
+		return Elapse{Valid: false}
 	}
-	return ElapsedSeconds{
+	return Elapse{
 		Float64: p.timeAtDataStarting.Sub(p.timeAtConnected).Seconds(),
 		Valid:   true,
 	}

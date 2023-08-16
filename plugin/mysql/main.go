@@ -12,7 +12,7 @@ import (
 const (
 	prefix    string = "mysql-plugin"
 	commQuery string = `insert into communications(id, connection_id, occurred_at, direction, data) values(?, ?, ?, ?, ?)`
-	connQuery string = `insert into connections(id, occurred_at, mail_from, mail_to, elapsed_seconds) values(?, ?, ?, ?, ?)`
+	connQuery string = `insert into connections(id, occurred_at, mail_from, mail_to, elapse) values(?, ?, ?, ?, ?)`
 )
 
 type Mysql struct {
@@ -71,7 +71,7 @@ func (m *Mysql) AfterConn(d *warp.AfterConnData) {
 		d.OccurredAt.Format(warp.TimeFormat),
 		d.MailFrom,
 		d.MailTo,
-		d.ElapsedSeconds,
+		d.Elapse,
 	)
 	if err != nil {
 		fmt.Printf("[%s] db exec error: %#v\n", prefix, err)
