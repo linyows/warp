@@ -5,10 +5,12 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 )
 
 type Pipe struct {
@@ -26,6 +28,9 @@ type Pipe struct {
 	readytls bool
 	locked   bool
 	blocker  chan interface{}
+
+	timeAtConnected    time.Time
+	timeAtDataStarting time.Time
 
 	afterCommHook func(Data, Direction)
 	afterConnHook func()
@@ -56,7 +61,8 @@ const (
 	downstream
 
 	// SMTP response codes
-	codeServiceReady int = 220
+	codeServiceReady      int = 220
+	codeStartingMailInput int = 354
 	//codeActionCompleted int = 250
 )
 
@@ -73,6 +79,7 @@ func (e ElapsedSeconds) String() string {
 }
 
 func (p *Pipe) Do() {
+	p.timeAtConnected = time.Now()
 	go p.afterCommHook([]byte(fmt.Sprintf("connected to %s", p.rAddr)), onPxy)
 
 	var once sync.Once
@@ -188,6 +195,10 @@ func (p *Pipe) copy(dr Flow, fn Mediator) (written int64, err error) {
 			if dr == upstream {
 				go p.afterCommHook(p.removeMailBody(buf[0:nr]), srcToDst)
 			} else {
+				// time before email input
+				if fmt.Sprint(buf[:3]) == fmt.Sprint(codeStartingMailInput) {
+					p.timeAtDataStarting = time.Now()
+				}
 				// remove buffering ready response
 				if bytes.Contains(buf, []byte("Ready to start TLS")) || bytes.Contains(buf, []byte("SMTP server ready")) || bytes.Contains(buf, []byte("Start TLS")) {
 					continue
