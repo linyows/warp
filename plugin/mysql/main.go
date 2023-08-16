@@ -12,7 +12,7 @@ import (
 const (
 	prefix    string = "mysql-plugin"
 	commQuery string = `insert into communications(id, connection_id, occurred_at, direction, data) values(?, ?, ?, ?, ?)`
-	connQuery string = `insert into connections(id, occurred_at, mail_from, mail_to) values(?, ?, ?, ?)`
+	connQuery string = `insert into connections(id, occurred_at, mail_from, mail_to, elapsed_seconds) values(?, ?, ?, ?, ?)`
 )
 
 type Mysql struct {
