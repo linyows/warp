@@ -60,6 +60,18 @@ const (
 	//codeActionCompleted int = 250
 )
 
+type ElapsedSeconds struct {
+	Float64 float64
+	Valid   bool
+}
+
+func (e ElapsedSeconds) String() string {
+	if !e.Valid {
+		return "nil"
+	}
+	return fmt.Sprintf("%dsec", int(e.Float64))
+}
+
 func (p *Pipe) Do() {
 	go p.afterCommHook([]byte(fmt.Sprintf("connected to %s", p.rAddr)), onPxy)
 

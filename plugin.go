@@ -30,10 +30,11 @@ type AfterCommData struct {
 }
 
 type AfterConnData struct {
-	ConnID     string
-	OccurredAt time.Time
-	MailFrom   []byte
-	MailTo     []byte
+	ConnID         string
+	OccurredAt     time.Time
+	MailFrom       []byte
+	MailTo         []byte
+	ElapsedSeconds ElapsedSeconds
 }
 
 func pluginDirExists() bool {
