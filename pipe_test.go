@@ -141,3 +141,26 @@ func TestRemoveStartTLSCommand(t *testing.T) {
 		}
 	}
 }
+
+func TestElapseString(t *testing.T) {
+	var tests = []struct {
+		elapse Elapse
+		expect string
+	}{
+		{
+			elapse: Elapse{Float64: float64(-9223372036854775808), Valid: true},
+			expect: "-9223372036854775808sec",
+		},
+		{
+			elapse: Elapse{Float64: 0, Valid: false},
+			expect: "nil",
+		},
+	}
+
+	for _, v := range tests {
+		got := v.elapse.String()
+		if got != v.expect {
+			t.Errorf("expected %s got %s", v.expect, got)
+		}
+	}
+}
