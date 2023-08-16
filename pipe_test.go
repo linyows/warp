@@ -2,6 +2,7 @@ package warp
 
 import (
 	"testing"
+	"time"
 )
 
 func TestPairing(t *testing.T) {
@@ -161,6 +162,41 @@ func TestElapseString(t *testing.T) {
 		got := v.elapse.String()
 		if got != v.expect {
 			t.Errorf("expected %s got %s", v.expect, got)
+		}
+	}
+}
+
+func TestElapse(t *testing.T) {
+	var tests = []struct {
+		start  time.Time
+		stop   time.Time
+		expect Elapse
+	}{
+		{
+			start:  time.Date(2023, time.August, 16, 14, 48, 0, 0, time.Local),
+			stop:   time.Date(2023, time.August, 16, 14, 48, 20, 0, time.Local),
+			expect: Elapse{Float64: float64(20), Valid: true},
+		},
+		{
+			start:  time.Time{},
+			stop:   time.Date(2023, time.August, 16, 14, 48, 20, 0, time.Local),
+			expect: Elapse{Float64: 0, Valid: false},
+		},
+		{
+			start:  time.Date(2023, time.August, 16, 14, 48, 0, 0, time.Local),
+			stop:   time.Time{},
+			expect: Elapse{Float64: 0, Valid: false},
+		},
+	}
+
+	for _, v := range tests {
+		p := &Pipe{
+			timeAtDataStarting: v.start,
+			timeAtConnected:    v.stop,
+		}
+		got := p.elapse()
+		if got != v.expect {
+			t.Errorf("expected %#v got %#v", v.expect, got)
 		}
 	}
 }
