@@ -115,7 +115,7 @@ func TestAfterComm(t *testing.T) {
 `)
 	f.AfterComm(data)
 	got := buffer.Bytes()
-	if bytes.Compare(expect, got) != 0 {
+	if !bytes.Equal(expect, got) {
 		t.Errorf("expected %s, got %s", expect, got)
 	}
 }
@@ -137,7 +137,7 @@ func TestAfterConn(t *testing.T) {
 `)
 	f.AfterConn(data)
 	got := buffer.Bytes()
-	if bytes.Compare(expect, got) != 0 {
+	if !bytes.Equal(expect, got) {
 		t.Errorf("expected %s, got %s", expect, got)
 	}
 }
