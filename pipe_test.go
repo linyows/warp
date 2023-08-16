@@ -173,17 +173,17 @@ func TestElapse(t *testing.T) {
 		expect Elapse
 	}{
 		{
-			start:  time.Date(2023, time.August, 16, 14, 48, 0, 0, time.Local),
-			stop:   time.Date(2023, time.August, 16, 14, 48, 20, 0, time.Local),
+			start:  time.Date(2023, time.August, 16, 14, 48, 0, 0, time.UTC),
+			stop:   time.Date(2023, time.August, 16, 14, 48, 20, 0, time.UTC),
 			expect: Elapse{Float64: float64(20), Valid: true},
 		},
 		{
 			start:  time.Time{},
-			stop:   time.Date(2023, time.August, 16, 14, 48, 20, 0, time.Local),
+			stop:   time.Date(2023, time.August, 16, 14, 48, 20, 0, time.UTC),
 			expect: Elapse{Float64: 0, Valid: false},
 		},
 		{
-			start:  time.Date(2023, time.August, 16, 14, 48, 0, 0, time.Local),
+			start:  time.Date(2023, time.August, 16, 14, 48, 0, 0, time.UTC),
 			stop:   time.Time{},
 			expect: Elapse{Float64: 0, Valid: false},
 		},

@@ -100,7 +100,7 @@ func TestWriter(t *testing.T) {
 }
 
 func TestAfterComm(t *testing.T) {
-	ti := time.Date(2023, time.August, 16, 14, 48, 0, 0, time.Local)
+	ti := time.Date(2023, time.August, 16, 14, 48, 0, 0, time.UTC)
 	buffer := new(bytes.Buffer)
 	f := File{
 		file: buffer,
@@ -111,7 +111,7 @@ func TestAfterComm(t *testing.T) {
 		Data:       []byte("hello"),
 		Direction:  "--",
 	}
-	expect := []byte(`{"type":"comm","occurred_at":"2023-08-16T14:48:00+09:00","connection_id":"abcdefg","direction":"--","data":"hello"}
+	expect := []byte(`{"type":"comm","occurred_at":"2023-08-16T14:48:00Z","connection_id":"abcdefg","direction":"--","data":"hello"}
 `)
 	f.AfterComm(data)
 	got := buffer.Bytes()
@@ -121,7 +121,7 @@ func TestAfterComm(t *testing.T) {
 }
 
 func TestAfterConn(t *testing.T) {
-	ti := time.Date(2023, time.August, 16, 14, 48, 0, 0, time.Local)
+	ti := time.Date(2023, time.August, 16, 14, 48, 0, 0, time.UTC)
 	buffer := new(bytes.Buffer)
 	f := File{
 		file: buffer,
@@ -133,7 +133,7 @@ func TestAfterConn(t *testing.T) {
 		MailTo:     []byte("bob@example.test"),
 		Elapse:     warp.Elapse{Float64: 20, Valid: true},
 	}
-	expect := []byte(`{"type":"conn","occurred_at":"2023-08-16T14:48:00+09:00","connection_id":"abcdefg","from":"alice@example.local","to":"bob@example.test","elapse":"20sec"}
+	expect := []byte(`{"type":"conn","occurred_at":"2023-08-16T14:48:00Z","connection_id":"abcdefg","from":"alice@example.local","to":"bob@example.test","elapse":"20sec"}
 `)
 	f.AfterConn(data)
 	got := buffer.Bytes()
