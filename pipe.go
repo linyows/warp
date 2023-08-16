@@ -342,3 +342,18 @@ func (p *Pipe) removeStartTLSCommand(b []byte, i int) ([]byte, int) {
 
 	return b, i
 }
+
+func (p *Pipe) elapsedSeconds() ElapsedSeconds {
+	if p.timeAtDataStarting.IsZero() {
+		log.Print("time at data starting is zero")
+		return ElapsedSeconds{Valid: false}
+	}
+	if p.timeAtConnected.IsZero() {
+		log.Print("time at connected is zero")
+		return ElapsedSeconds{Valid: false}
+	}
+	return ElapsedSeconds{
+		Float64: p.timeAtDataStarting.Sub(p.timeAtConnected).Seconds(),
+		Valid:   true,
+	}
+}
