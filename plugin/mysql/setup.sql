@@ -9,6 +9,7 @@ CREATE TABLE `connections` (
     `mail_from` varchar(512) DEFAULT NULL,
     `mail_to` varchar(512) DEFAULT NULL,
     `occurred_at` timestamp(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    `elapsed_seconds` bigint,
     PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
