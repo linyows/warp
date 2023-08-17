@@ -71,7 +71,7 @@ func (e Elapse) String() string {
 	if e < 0 {
 		return "nil"
 	}
-	return fmt.Sprintf("%dsec", e)
+	return fmt.Sprintf("%d msec", e)
 }
 
 func (p *Pipe) Do() {
@@ -192,8 +192,11 @@ func (p *Pipe) copy(dr Flow, fn Mediator) (written int64, err error) {
 				go p.afterCommHook(p.removeMailBody(buf[0:nr]), srcToDst)
 			} else {
 				// time before email input
-				if fmt.Sprint(buf[:3]) == fmt.Sprint(codeStartingMailInput) {
-					p.timeAtDataStarting = time.Now()
+				list := bytes.Split(buf, []byte(crlf))
+				for _, v := range list {
+					if len(v) >= 3 && string(v[:3]) == fmt.Sprint(codeStartingMailInput) {
+						p.timeAtDataStarting = time.Now()
+					}
 				}
 				// remove buffering ready response
 				if bytes.Contains(buf, []byte("Ready to start TLS")) || bytes.Contains(buf, []byte("SMTP server ready")) || bytes.Contains(buf, []byte("Start TLS")) {
@@ -348,5 +351,5 @@ func (p *Pipe) elapse() Elapse {
 		log.Print("oops, data time is zero")
 		return -1
 	}
-	return Elapse(p.timeAtConnected.Sub(p.timeAtDataStarting).Seconds())
+	return Elapse(p.timeAtDataStarting.Sub(p.timeAtConnected).Milliseconds())
 }
