@@ -66,6 +66,11 @@ const (
 	//codeActionCompleted int = 250
 )
 
+var (
+	mailFromRegex = regexp.MustCompile(mailFromPrefix + mailRegex)
+	mailToRegex   = regexp.MustCompile(rcptToPrefix + mailRegex)
+)
+
 func (e Elapse) String() string {
 	if e < 0 {
 		return "nil"
@@ -133,12 +138,10 @@ func (p *Pipe) pairing(b []byte) {
 		p.sServerName = bytes.TrimSpace(bytes.Replace(b, []byte("EHLO"), []byte(""), 1))
 	}
 	if bytes.Contains(b, []byte(mailFromPrefix)) {
-		re := regexp.MustCompile(mailFromPrefix + mailRegex)
-		p.sMailAddr = bytes.Replace(re.Find(b), []byte(mailFromPrefix), []byte(""), 1)
+		p.sMailAddr = bytes.Replace(mailFromRegex.Find(b), []byte(mailFromPrefix), []byte(""), 1)
 	}
 	if bytes.Contains(b, []byte(rcptToPrefix)) {
-		re := regexp.MustCompile(rcptToPrefix + mailRegex)
-		p.rMailAddr = bytes.Replace(re.Find(b), []byte(rcptToPrefix), []byte(""), 1)
+		p.rMailAddr = bytes.Replace(mailToRegex.Find(b), []byte(rcptToPrefix), []byte(""), 1)
 		p.rServerName = bytes.Split(p.rMailAddr, []byte("@"))[1]
 	}
 }
