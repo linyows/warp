@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"regexp"
 	"strings"
@@ -65,6 +64,11 @@ const (
 	codeServiceReady      int = 220
 	codeStartingMailInput int = 354
 	//codeActionCompleted int = 250
+)
+
+var (
+	mailFromRegex = regexp.MustCompile(mailFromPrefix + mailRegex)
+	mailToRegex   = regexp.MustCompile(rcptToPrefix + mailRegex)
 )
 
 func (e Elapse) String() string {
@@ -134,12 +138,10 @@ func (p *Pipe) pairing(b []byte) {
 		p.sServerName = bytes.TrimSpace(bytes.Replace(b, []byte("EHLO"), []byte(""), 1))
 	}
 	if bytes.Contains(b, []byte(mailFromPrefix)) {
-		re := regexp.MustCompile(mailFromPrefix + mailRegex)
-		p.sMailAddr = bytes.Replace(re.Find(b), []byte(mailFromPrefix), []byte(""), 1)
+		p.sMailAddr = bytes.Replace(mailFromRegex.Find(b), []byte(mailFromPrefix), []byte(""), 1)
 	}
 	if bytes.Contains(b, []byte(rcptToPrefix)) {
-		re := regexp.MustCompile(rcptToPrefix + mailRegex)
-		p.rMailAddr = bytes.Replace(re.Find(b), []byte(rcptToPrefix), []byte(""), 1)
+		p.rMailAddr = bytes.Replace(mailToRegex.Find(b), []byte(rcptToPrefix), []byte(""), 1)
 		p.rServerName = bytes.Split(p.rMailAddr, []byte("@"))[1]
 	}
 }
@@ -344,12 +346,10 @@ func (p *Pipe) removeStartTLSCommand(b []byte, i int) ([]byte, int) {
 
 func (p *Pipe) elapse() Elapse {
 	if p.timeAtConnected.IsZero() {
-		log.Print("oops, connected time is zero")
 		return -1
 	}
 	if p.timeAtDataStarting.IsZero() {
-		log.Print("oops, data time is zero")
-		return -1
+		return -2
 	}
 	return Elapse(p.timeAtDataStarting.Sub(p.timeAtConnected).Milliseconds())
 }
