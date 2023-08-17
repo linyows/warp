@@ -185,7 +185,7 @@ func TestElapse(t *testing.T) {
 		{
 			start:  time.Date(2023, time.August, 16, 14, 48, 0, 0, time.UTC),
 			stop:   time.Time{},
-			expect: -1,
+			expect: -2,
 		},
 	}
 

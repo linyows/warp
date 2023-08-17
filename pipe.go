@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"regexp"
 	"strings"
@@ -344,12 +343,10 @@ func (p *Pipe) removeStartTLSCommand(b []byte, i int) ([]byte, int) {
 
 func (p *Pipe) elapse() Elapse {
 	if p.timeAtConnected.IsZero() {
-		log.Print("oops, connected time is zero")
 		return -1
 	}
 	if p.timeAtDataStarting.IsZero() {
-		log.Print("oops, data time is zero")
-		return -1
+		return -2
 	}
 	return Elapse(p.timeAtDataStarting.Sub(p.timeAtConnected).Milliseconds())
 }
