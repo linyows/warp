@@ -131,7 +131,7 @@ func TestAfterConn(t *testing.T) {
 		OccurredAt: ti,
 		MailFrom:   []byte("alice@example.local"),
 		MailTo:     []byte("bob@example.test"),
-		Elapse:     warp.Elapse{Float64: 20, Valid: true},
+		Elapse:     20,
 	}
 	expect := []byte(`{"type":"conn","occurred_at":"2023-08-16T14:48:00Z","connection_id":"abcdefg","from":"alice@example.local","to":"bob@example.test","elapse":"20sec"}
 `)

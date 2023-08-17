@@ -40,6 +40,7 @@ type Mediator func([]byte, int) ([]byte, int)
 type Flow int
 type Data []byte
 type Direction string
+type Elapse int
 
 const (
 	mailFromPrefix string = "MAIL FROM:<"
@@ -66,16 +67,11 @@ const (
 	//codeActionCompleted int = 250
 )
 
-type Elapse struct {
-	Float64 float64
-	Valid   bool
-}
-
 func (e Elapse) String() string {
-	if !e.Valid {
+	if e < 0 {
 		return "nil"
 	}
-	return fmt.Sprintf("%dsec", int(e.Float64))
+	return fmt.Sprintf("%dsec", e)
 }
 
 func (p *Pipe) Do() {
@@ -346,14 +342,11 @@ func (p *Pipe) removeStartTLSCommand(b []byte, i int) ([]byte, int) {
 func (p *Pipe) elapse() Elapse {
 	if p.timeAtConnected.IsZero() {
 		log.Print("oops, connected time is zero")
-		return Elapse{Valid: false}
+		return -1
 	}
 	if p.timeAtDataStarting.IsZero() {
 		log.Print("oops, data time is zero")
-		return Elapse{Valid: false}
+		return -1
 	}
-	return Elapse{
-		Float64: p.timeAtConnected.Sub(p.timeAtDataStarting).Seconds(),
-		Valid:   true,
-	}
+	return Elapse(p.timeAtConnected.Sub(p.timeAtDataStarting).Seconds())
 }

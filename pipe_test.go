@@ -149,11 +149,11 @@ func TestElapseString(t *testing.T) {
 		expect string
 	}{
 		{
-			elapse: Elapse{Float64: float64(-9223372036854775808), Valid: true},
-			expect: "-9223372036854775808sec",
+			elapse: 2147483647,
+			expect: "2147483647sec",
 		},
 		{
-			elapse: Elapse{Float64: 0, Valid: false},
+			elapse: -1,
 			expect: "nil",
 		},
 	}
@@ -175,17 +175,17 @@ func TestElapse(t *testing.T) {
 		{
 			start:  time.Date(2023, time.August, 16, 14, 48, 0, 0, time.UTC),
 			stop:   time.Date(2023, time.August, 16, 14, 48, 20, 0, time.UTC),
-			expect: Elapse{Float64: float64(20), Valid: true},
+			expect: 20,
 		},
 		{
 			start:  time.Time{},
 			stop:   time.Date(2023, time.August, 16, 14, 48, 20, 0, time.UTC),
-			expect: Elapse{Float64: 0, Valid: false},
+			expect: -1,
 		},
 		{
 			start:  time.Date(2023, time.August, 16, 14, 48, 0, 0, time.UTC),
 			stop:   time.Time{},
-			expect: Elapse{Float64: 0, Valid: false},
+			expect: -1,
 		},
 	}
 
