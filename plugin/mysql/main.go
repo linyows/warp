@@ -45,7 +45,7 @@ func (m *Mysql) AfterComm(d *warp.AfterCommData) {
 		return
 	}
 
-	_, err := conn.Exec(
+	_, err = conn.Exec(
 		commQuery,
 		warp.GenID().String(),
 		d.ConnID,
@@ -65,7 +65,7 @@ func (m *Mysql) AfterConn(d *warp.AfterConnData) {
 		return
 	}
 
-	_, err := conn.Exec(
+	_, err = conn.Exec(
 		connQuery,
 		d.ConnID,
 		d.OccurredAt.Format(warp.TimeFormat),
