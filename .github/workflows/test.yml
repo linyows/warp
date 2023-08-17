@@ -25,3 +25,6 @@ jobs:
     - name: File-plugin test
       run: go test -v
       working-directory: ./plugin/file
+    - name: MySQL-plugin test
+      run: go test -v
+      working-directory: ./plugin/mysql
