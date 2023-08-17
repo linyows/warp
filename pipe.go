@@ -348,5 +348,5 @@ func (p *Pipe) elapse() Elapse {
 		log.Print("oops, data time is zero")
 		return -1
 	}
-	return Elapse(p.timeAtConnected.Sub(p.timeAtDataStarting).Milliseconds())
+	return Elapse(p.timeAtDataStarting.Sub(p.timeAtConnected).Milliseconds())
 }

@@ -191,8 +191,8 @@ func TestElapse(t *testing.T) {
 
 	for _, v := range tests {
 		p := &Pipe{
-			timeAtDataStarting: v.start,
-			timeAtConnected:    v.stop,
+			timeAtConnected:    v.start,
+			timeAtDataStarting: v.stop,
 		}
 		got := p.elapse()
 		if got != v.expect {
