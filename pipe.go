@@ -194,7 +194,7 @@ func (p *Pipe) copy(dr Flow, fn Mediator) (written int64, err error) {
 				// time before email input
 				list := bytes.Split(buf, []byte(crlf))
 				for _, v := range list {
-					if len(v) >= 3 && fmt.Sprintf("%s", v[:3]) == fmt.Sprint(codeStartingMailInput) {
+					if len(v) >= 3 && string(v[:3]) == fmt.Sprint(codeStartingMailInput) {
 						p.timeAtDataStarting = time.Now()
 					}
 				}
