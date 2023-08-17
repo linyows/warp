@@ -23,8 +23,6 @@ jobs:
     - name: Core test
       run: go test -v
     - name: File-plugin test
-      run: go test -v
-      working-directory: ./plugin/file
+      run: go test -v ./plugin/file
     - name: MySQL-plugin test
-      run: go test -v
-      working-directory: ./plugin/mysql
+      run: go test -v ./plugin/mysql
