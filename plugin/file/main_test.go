@@ -133,7 +133,7 @@ func TestAfterConn(t *testing.T) {
 		MailTo:     []byte("bob@example.test"),
 		Elapse:     20,
 	}
-	expect := []byte(`{"type":"conn","occurred_at":"2023-08-16T14:48:00Z","connection_id":"abcdefg","from":"alice@example.local","to":"bob@example.test","elapse":"20sec"}
+	expect := []byte(`{"type":"conn","occurred_at":"2023-08-16T14:48:00Z","connection_id":"abcdefg","from":"alice@example.local","to":"bob@example.test","elapse":"20 msec"}
 `)
 	f.AfterConn(data)
 	got := buffer.Bytes()

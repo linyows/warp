@@ -71,7 +71,7 @@ func (e Elapse) String() string {
 	if e < 0 {
 		return "nil"
 	}
-	return fmt.Sprintf("%dsec", e)
+	return fmt.Sprintf("%d msec", e)
 }
 
 func (p *Pipe) Do() {
@@ -348,5 +348,5 @@ func (p *Pipe) elapse() Elapse {
 		log.Print("oops, data time is zero")
 		return -1
 	}
-	return Elapse(p.timeAtConnected.Sub(p.timeAtDataStarting).Seconds())
+	return Elapse(p.timeAtConnected.Sub(p.timeAtDataStarting).Milliseconds())
 }
