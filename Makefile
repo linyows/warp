@@ -17,14 +17,21 @@ run:
 	env GOOS=$(GOOS) GOARCH=$(GOARCH) go run ./cmd/warp/main.go
 
 test:
+	go test -v
+
+test-all:
 	go test $(TEST_OPTIONS) -failfast -race -coverpkg=./... -covermode=atomic \
 		-coverprofile=coverage.txt $(SOURCE_FILES) -run $(TEST_PATTERN) -timeout=5m
 
-integration:
+test-integration:
 	cd integration && go test -v
 
+test-mysql-plugin:
+	cd plugin/mysql && go test -v
+test-file-plugin:
+	cd plugin/file && go test -v
+
 mysql-plugin:
-	go get github.com/go-sql-driver/mysql
 	env GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -buildmode=plugin -o plugin/mysql.so plugin/mysql/main.go
 file-plugin:
 	env GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -buildmode=plugin -o plugin/file.so plugin/file/main.go

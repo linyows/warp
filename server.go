@@ -38,12 +38,12 @@ func (s *Server) Start() error {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
-			log.Printf("accept error: %#v", err)
+			log.Printf("accept error(is the warp port open globally?): %#v", err)
 			continue
 		}
 		if s.Addr == conn.RemoteAddr().String() {
 			conn.Close()
-			log.Printf("closed connection due to same ip: %s", conn.RemoteAddr())
+			log.Printf("closed connection due to same ip(looping requests to warp?): %s", conn.RemoteAddr())
 			continue
 		}
 		go s.HandleConnection(conn)
@@ -106,13 +106,15 @@ func (s *Server) HandleConnection(conn net.Conn) {
 	}
 	p.afterConnHook = func() {
 		now := time.Now()
-		log.Printf("[%s] %s from:%s to:%s", now.Format(TimeFormat), p.id, p.sMailAddr, p.rMailAddr)
+		elapse := p.elapse()
+		log.Printf("[%s] %s from:%s to:%s elapse:%s", now.Format(TimeFormat), p.id, p.sMailAddr, p.rMailAddr, elapse)
 		for _, hook := range s.Hooks {
 			hook.AfterConn(&AfterConnData{
 				ConnID:     p.id,
 				OccurredAt: now,
 				MailFrom:   p.sMailAddr,
 				MailTo:     p.rMailAddr,
+				Elapse:     elapse,
 			})
 		}
 	}

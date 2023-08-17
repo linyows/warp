@@ -2,6 +2,7 @@ package warp
 
 import (
 	"testing"
+	"time"
 )
 
 func TestPairing(t *testing.T) {
@@ -138,6 +139,64 @@ func TestRemoveStartTLSCommand(t *testing.T) {
 		}
 		if v.expeTLS != pipe.readytls {
 			t.Errorf("tls expected %#v got %#v", v.expeTLS, pipe.readytls)
+		}
+	}
+}
+
+func TestElapseString(t *testing.T) {
+	var tests = []struct {
+		elapse Elapse
+		expect string
+	}{
+		{
+			elapse: 2147483647,
+			expect: "2147483647sec",
+		},
+		{
+			elapse: -1,
+			expect: "nil",
+		},
+	}
+
+	for _, v := range tests {
+		got := v.elapse.String()
+		if got != v.expect {
+			t.Errorf("expected %s got %s", v.expect, got)
+		}
+	}
+}
+
+func TestElapse(t *testing.T) {
+	var tests = []struct {
+		start  time.Time
+		stop   time.Time
+		expect Elapse
+	}{
+		{
+			start:  time.Date(2023, time.August, 16, 14, 48, 0, 0, time.UTC),
+			stop:   time.Date(2023, time.August, 16, 14, 48, 20, 0, time.UTC),
+			expect: 20,
+		},
+		{
+			start:  time.Time{},
+			stop:   time.Date(2023, time.August, 16, 14, 48, 20, 0, time.UTC),
+			expect: -1,
+		},
+		{
+			start:  time.Date(2023, time.August, 16, 14, 48, 0, 0, time.UTC),
+			stop:   time.Time{},
+			expect: -1,
+		},
+	}
+
+	for _, v := range tests {
+		p := &Pipe{
+			timeAtDataStarting: v.start,
+			timeAtConnected:    v.stop,
+		}
+		got := p.elapse()
+		if got != v.expect {
+			t.Errorf("expected %#v got %#v", v.expect, got)
 		}
 	}
 }

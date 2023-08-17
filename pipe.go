@@ -5,10 +5,12 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 )
 
 type Pipe struct {
@@ -27,6 +29,9 @@ type Pipe struct {
 	locked   bool
 	blocker  chan interface{}
 
+	timeAtConnected    time.Time
+	timeAtDataStarting time.Time
+
 	afterCommHook func(Data, Direction)
 	afterConnHook func()
 }
@@ -35,6 +40,7 @@ type Mediator func([]byte, int) ([]byte, int)
 type Flow int
 type Data []byte
 type Direction string
+type Elapse int
 
 const (
 	mailFromPrefix string = "MAIL FROM:<"
@@ -56,11 +62,20 @@ const (
 	downstream
 
 	// SMTP response codes
-	codeServiceReady int = 220
+	codeServiceReady      int = 220
+	codeStartingMailInput int = 354
 	//codeActionCompleted int = 250
 )
 
+func (e Elapse) String() string {
+	if e < 0 {
+		return "nil"
+	}
+	return fmt.Sprintf("%dsec", e)
+}
+
 func (p *Pipe) Do() {
+	p.timeAtConnected = time.Now()
 	go p.afterCommHook([]byte(fmt.Sprintf("connected to %s", p.rAddr)), onPxy)
 
 	var once sync.Once
@@ -83,7 +98,7 @@ func (p *Pipe) Do() {
 			}
 			return b, i
 		})
-		if err != nil && !strings.Contains(err.Error(), "use of closed network connection") {
+		if err != nil {
 			go p.afterCommHook([]byte(fmt.Sprintf("io copy error: %s", err.Error())), pxyToDst)
 		}
 		once.Do(p.close())
@@ -104,7 +119,7 @@ func (p *Pipe) Do() {
 			}
 			return b, i
 		})
-		if err != nil && !strings.Contains(err.Error(), "use of closed network connection") {
+		if err != nil {
 			go p.afterCommHook([]byte(fmt.Sprintf("io copy error: %s", err.Error())), dstToPxy)
 		}
 		once.Do(p.close())
@@ -176,6 +191,10 @@ func (p *Pipe) copy(dr Flow, fn Mediator) (written int64, err error) {
 			if dr == upstream {
 				go p.afterCommHook(p.removeMailBody(buf[0:nr]), srcToDst)
 			} else {
+				// time before email input
+				if fmt.Sprint(buf[:3]) == fmt.Sprint(codeStartingMailInput) {
+					p.timeAtDataStarting = time.Now()
+				}
 				// remove buffering ready response
 				if bytes.Contains(buf, []byte("Ready to start TLS")) || bytes.Contains(buf, []byte("SMTP server ready")) || bytes.Contains(buf, []byte("Start TLS")) {
 					continue
@@ -318,4 +337,16 @@ func (p *Pipe) removeStartTLSCommand(b []byte, i int) ([]byte, int) {
 	}
 
 	return b, i
+}
+
+func (p *Pipe) elapse() Elapse {
+	if p.timeAtConnected.IsZero() {
+		log.Print("oops, connected time is zero")
+		return -1
+	}
+	if p.timeAtDataStarting.IsZero() {
+		log.Print("oops, data time is zero")
+		return -1
+	}
+	return Elapse(p.timeAtConnected.Sub(p.timeAtDataStarting).Seconds())
 }

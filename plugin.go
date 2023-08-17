@@ -34,6 +34,7 @@ type AfterConnData struct {
 	OccurredAt time.Time
 	MailFrom   []byte
 	MailTo     []byte
+	Elapse
 }
 
 func pluginDirExists() bool {
