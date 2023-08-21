@@ -16,6 +16,12 @@ type Server struct {
 	Hooks []Hook
 }
 
+// These are global variables for integration test.
+var (
+	specifiedDstIP   = ""
+	specifiedDstPort = 0
+)
+
 func (s *Server) Start() error {
 	hooks, err := loadPlugins()
 	if err != nil {
@@ -122,6 +128,13 @@ func (s *Server) HandleConnection(conn net.Conn) {
 }
 
 func (s *Server) OriginalAddrDst(conn net.Conn) (*net.TCPAddr, error) {
+	if specifiedDstIP != "" && specifiedDstPort != 0 {
+		return &net.TCPAddr{
+			IP:   net.ParseIP(specifiedDstIP),
+			Port: specifiedDstPort,
+		}, nil
+	}
+
 	tcpConn, ok := conn.(*net.TCPConn)
 	if !ok {
 		return nil, fmt.Errorf("net.TCPConn cast error")
