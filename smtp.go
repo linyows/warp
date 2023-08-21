@@ -98,8 +98,6 @@ func (s *SMTPServer) Serve() error {
 		c := &SMTPConn{hostname: s.Hostname, id: GenID().String(), log: s.log}
 		go c.handle(conn)
 	}
-
-	return nil
 }
 
 type SMTPConn struct {
