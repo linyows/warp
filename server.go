@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
 	"syscall"
 	"time"
 )
@@ -14,9 +15,20 @@ type Server struct {
 	Addr  string
 	Port  int
 	Hooks []Hook
+	log   *log.Logger
 }
 
+// These are global variables for integration test.
+var (
+	specifiedDstIP   = ""
+	specifiedDstPort = 0
+)
+
 func (s *Server) Start() error {
+	if s.log == nil {
+		s.log = log.New(os.Stderr, "", log.Ldate|log.Ltime|log.Lmicroseconds)
+	}
+
 	hooks, err := loadPlugins()
 	if err != nil {
 		return err
@@ -33,17 +45,17 @@ func (s *Server) Start() error {
 		return err
 	}
 	defer ln.Close()
-	log.Printf("warp listens to %s:%d", s.Addr, s.Port)
+	s.log.Printf("warp listens to %s:%d", s.Addr, s.Port)
 
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
-			log.Printf("accept error(is the warp port open globally?): %#v", err)
+			s.log.Printf("accept error(is the warp port open globally?): %#v", err)
 			continue
 		}
 		if s.Addr == conn.RemoteAddr().String() {
 			conn.Close()
-			log.Printf("closed connection due to same ip(looping requests to warp?): %s", conn.RemoteAddr())
+			s.log.Printf("closed connection due to same ip(looping requests to warp?): %s", conn.RemoteAddr())
 			continue
 		}
 		go s.HandleConnection(conn)
@@ -52,18 +64,18 @@ func (s *Server) Start() error {
 
 func (s *Server) HandleConnection(conn net.Conn) {
 	uuid := GenID().String()
-	log.Printf("[%s] %s %s connected from %s", time.Now().Format(TimeFormat), uuid, onPxy, conn.RemoteAddr())
+	s.log.Printf("%s %s connected from %s", uuid, onPxy, conn.RemoteAddr())
 
 	raddr, err := s.OriginalAddrDst(conn)
 	if err != nil {
-		log.Printf("[%s] %s %s original addr error: %#v", time.Now().Format(TimeFormat), uuid, onPxy, err)
+		s.log.Printf("%s %s original addr error: %#v", uuid, onPxy, err)
 		return
 	}
 
 	go func() {
 		now := time.Now()
 		b := []byte(fmt.Sprintf("connecting to %s", raddr))
-		log.Printf("[%s] %s %s %s", now.Format(TimeFormat), uuid, onPxy, b)
+		s.log.Printf("%s %s %s", uuid, onPxy, b)
 		for _, hook := range s.Hooks {
 			hook.AfterComm(&AfterCommData{
 				ConnID:     uuid,
@@ -76,13 +88,13 @@ func (s *Server) HandleConnection(conn net.Conn) {
 
 	laddr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:0", s.Addr))
 	if err != nil {
-		log.Printf("[%s] %s %s resolve tcp addr error: %#v", time.Now().Format(TimeFormat), uuid, onPxy, err)
+		s.log.Printf("%s %s resolve tcp addr error: %#v", uuid, onPxy, err)
 		return
 	}
 	dialer := &net.Dialer{LocalAddr: laddr}
 	dstConn, err := dialer.Dial("tcp", raddr.String())
 	if err != nil {
-		log.Printf("[%s] %s %s dial `%s` error: %#v", time.Now().Format(TimeFormat), uuid, onPxy, raddr, err)
+		s.log.Printf("%s %s dial `%s` error: %#v", uuid, onPxy, raddr, err)
 		return
 	}
 
@@ -94,7 +106,7 @@ func (s *Server) HandleConnection(conn net.Conn) {
 	}
 	p.afterCommHook = func(b Data, to Direction) {
 		now := time.Now()
-		log.Printf("[%s] %s %s %s", now.Format(TimeFormat), p.id, to, p.escapeCRLF(b))
+		s.log.Printf("%s %s %s", p.id, to, p.escapeCRLF(b))
 		for _, hook := range s.Hooks {
 			hook.AfterComm(&AfterCommData{
 				ConnID:     p.id,
@@ -107,7 +119,7 @@ func (s *Server) HandleConnection(conn net.Conn) {
 	p.afterConnHook = func() {
 		now := time.Now()
 		elapse := p.elapse()
-		log.Printf("[%s] %s from:%s to:%s elapse:%s", now.Format(TimeFormat), p.id, p.sMailAddr, p.rMailAddr, elapse)
+		s.log.Printf("%s from:%s to:%s elapse:%s", p.id, p.sMailAddr, p.rMailAddr, elapse)
 		for _, hook := range s.Hooks {
 			hook.AfterConn(&AfterConnData{
 				ConnID:     p.id,
@@ -122,6 +134,13 @@ func (s *Server) HandleConnection(conn net.Conn) {
 }
 
 func (s *Server) OriginalAddrDst(conn net.Conn) (*net.TCPAddr, error) {
+	if specifiedDstIP != "" && specifiedDstPort != 0 {
+		return &net.TCPAddr{
+			IP:   net.ParseIP(specifiedDstIP),
+			Port: specifiedDstPort,
+		}, nil
+	}
+
 	tcpConn, ok := conn.(*net.TCPConn)
 	if !ok {
 		return nil, fmt.Errorf("net.TCPConn cast error")

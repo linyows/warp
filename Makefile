@@ -17,10 +17,10 @@ run:
 	env GOOS=$(GOOS) GOARCH=$(GOARCH) go run ./cmd/warp/main.go
 
 test:
-	@go test -v $(shell go list ./... | grep -v integration)
+	go test -v -short ./...
 
-integration:
-	go test -v ./integration
+integration: key
+	go test -v -run TestIntegration
 
 test-all:
 	go test $(TEST_OPTIONS) -failfast -race -coverpkg=./... -covermode=atomic -coverprofile=coverage.txt $(SOURCE_FILES) -run $(TEST_PATTERN) -timeout=5m
@@ -30,6 +30,10 @@ mysql-plugin:
 
 file-plugin:
 	env GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -buildmode=plugin -o plugin/file.so plugin/file/main.go
+
+key:
+	@rm -rf testdata/server.*
+	@openssl req -x509 -days 10 -newkey ED25519 -nodes -out ./testdata/server.crt -keyout ./testdata/server.key -subj "/C=/ST=/L=/O=/OU=/CN=example.local" &>/dev/null
 
 release:
 	@test -z $(GITHUB_TOKEN) || goreleaser --rm-dist

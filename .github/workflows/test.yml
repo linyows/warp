@@ -20,9 +20,5 @@ jobs:
     - uses: actions/setup-go@v2
       with:
         go-version: ${{ matrix.go-version }}
-    - name: Core test
-      run: go test -v
-    - name: File-plugin test
-      run: go test -v ./plugin/file
-    - name: MySQL-plugin test
-      run: go test -v ./plugin/mysql
+    - name: Run test without integration-test
+      run: go test -v -short ./...

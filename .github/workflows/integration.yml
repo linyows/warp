@@ -18,4 +18,4 @@ jobs:
       with:
         go-version: ${{ matrix.go-version }}
     - name: Go test
-      run: cd integration && go test -v
+      run: make integration
