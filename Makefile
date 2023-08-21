@@ -17,10 +17,10 @@ run:
 	env GOOS=$(GOOS) GOARCH=$(GOARCH) go run ./cmd/warp/main.go
 
 test:
-	@go test -v $(shell go list ./... | grep -v integration)
+	go test -v -short ./...
 
-integration:
-	go test -v ./integration
+integration: key
+	go test -v -run TestIntegration
 
 test-all:
 	go test $(TEST_OPTIONS) -failfast -race -coverpkg=./... -covermode=atomic -coverprofile=coverage.txt $(SOURCE_FILES) -run $(TEST_PATTERN) -timeout=5m
