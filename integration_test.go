@@ -1,6 +1,9 @@
 package warp
 
 import (
+	"bytes"
+	"fmt"
+	"log"
 	"testing"
 )
 
@@ -14,17 +17,31 @@ func TestIntegration(t *testing.T) {
 	smtpPort := 11025
 	hostname := "example.local"
 
+	var (
+		warpLog bytes.Buffer
+		smtpLog bytes.Buffer
+	)
+
 	go func() {
 		specifiedDstIP = ip
 		specifiedDstPort = smtpPort
-		w := &Server{Addr: ip, Port: warpPort}
+		w := &Server{
+			Addr: ip,
+			Port: warpPort,
+			log:  log.New(&warpLog, "", log.Ldate|log.Ltime|log.Lmicroseconds),
+		}
 		if err := w.Start(); err != nil {
 			t.Errorf("warp raised error: %s", err)
 		}
 	}()
 
 	go func() {
-		s := &SMTPServer{IP: ip, Port: smtpPort, Hostname: hostname}
+		s := &SMTPServer{
+			IP:       ip,
+			Port:     smtpPort,
+			Hostname: hostname,
+			log:      log.New(&smtpLog, "", log.Ldate|log.Ltime|log.Lmicroseconds),
+		}
 		if err := s.Serve(); err != nil {
 			t.Errorf("smtp server raised error: %s", err)
 		}
@@ -34,7 +51,12 @@ func TestIntegration(t *testing.T) {
 	WaitForServerListen(ip, smtpPort)
 
 	c := &SMTPClient{IP: ip, Port: warpPort}
-	if err := c.SendEmail(); err != nil {
+	err := c.SendEmail()
+
+	fmt.Printf("\nWarp Server:\n%s", &warpLog)
+	fmt.Printf("\nSMTP Server:\n%s\n", &smtpLog)
+
+	if err != nil {
 		t.Errorf("smtp client raised error: %s", err)
 	}
 }

@@ -3,12 +3,20 @@ package warp
 import (
 	"bufio"
 	"crypto/tls"
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/smtp"
+	"os"
 	"strings"
 	"time"
+)
+
+const (
+	outgoing  Direction = "->"
+	incomming Direction = "<-"
 )
 
 func WaitForServerListen(ip string, port int) {
@@ -36,34 +44,27 @@ type SMTPClient struct {
 func (c *SMTPClient) SendEmail() error {
 	s, err := smtp.Dial(fmt.Sprintf("%s:%d", c.IP, c.Port))
 	if err != nil {
-		log.Println("smtp dial error")
-		return err
+		return fmt.Errorf("smtp.Dial(%s:%d): %#v", c.IP, c.Port, err)
 	}
 	if err := s.Mail("alice@example.test"); err != nil {
-		log.Println("smtp mail error")
-		return err
+		return fmt.Errorf("smtp mail error: %#v", err)
 	}
 	if err := s.Rcpt("bob@example.local"); err != nil {
-		log.Println("smtp rcpt error")
-		return err
+		return fmt.Errorf("smtp rcpt error: %#v", err)
 	}
 	wc, err := s.Data()
 	if err != nil {
-		log.Println("smtp data error")
-		return err
+		return fmt.Errorf("smtp data error: %#v", err)
 	}
 	_, err = fmt.Fprintf(wc, "This is the email body")
 	if err != nil {
-		log.Println("smtp data print error")
-		return err
+		return fmt.Errorf("smtp data print error: %#v", err)
 	}
 	if err = wc.Close(); err != nil {
-		log.Println("smtp close print error")
-		return err
+		return fmt.Errorf("smtp close print error: %#v", err)
 	}
 	if err = s.Quit(); err != nil {
-		log.Println("smtp quit error")
-		return err
+		return fmt.Errorf("smtp quit error: %#v", err)
 	}
 	return nil
 }
@@ -72,24 +73,29 @@ type SMTPServer struct {
 	IP       string
 	Port     int
 	Hostname string
+	log      *log.Logger
 }
 
 func (s *SMTPServer) Serve() error {
+	if s.log == nil {
+		s.log = log.New(os.Stderr, "", log.LstdFlags)
+	}
+
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", s.Port))
 	if err != nil {
 		return fmt.Errorf("net.Listen(tcp) error: %#v", err)
 	}
 	defer listener.Close()
 
-	log.Printf("SMTP server is listening on :%d\n", s.Port)
+	s.log.Printf("SMTP server is listening on :%d\n", s.Port)
 
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			log.Println("Accept error:", err)
+			s.log.Println("Accept error:", err)
 			continue
 		}
-		c := &SMTPConn{hostname: s.Hostname}
+		c := &SMTPConn{hostname: s.Hostname, id: GenID().String(), log: s.log}
 		go c.handle(conn)
 	}
 
@@ -99,16 +105,10 @@ func (s *SMTPServer) Serve() error {
 type SMTPConn struct {
 	reader   *bufio.Reader
 	writer   *bufio.Writer
-	data     bool
+	id       string
 	hostname string
-}
-
-func (c *SMTPConn) writeStringWithLog(str string) {
-	_, err := c.writer.WriteString(str + crlf)
-	if err != nil {
-		log.Printf("WriteString error: %#v", err)
-	}
-	log.Println(strings.ReplaceAll(str, crlf, "\\r\\n"))
+	data     bool
+	log      *log.Logger
 }
 
 func (c *SMTPConn) handle(conn net.Conn) {
@@ -117,18 +117,20 @@ func (c *SMTPConn) handle(conn net.Conn) {
 	c.reader = bufio.NewReader(conn)
 	c.writer = bufio.NewWriter(conn)
 
-	c.writeStringWithLog(fmt.Sprintf("220 %s ESMTP Server (Go)", c.hostname))
+	c.writeStringWithLog(fmt.Sprintf("220 %s ESMTP Server", c.hostname))
 	c.writer.Flush()
 	c.data = false
 
 	for {
 		line, err := c.reader.ReadString('\n')
 		if err != nil {
-			log.Println("already server port listen!")
+			if !errors.Is(err, io.EOF) {
+				c.log.Printf("%s %s conn ReadString error: %#v", c.id, "--", err)
+			}
 			return
 		}
 
-		log.Printf("<=== %s", line)
+		c.log.Printf("%s %s %s", c.id, incomming, line)
 		line = strings.TrimSpace(line)
 		parts := strings.Fields(line)
 		if len(parts) == 0 {
@@ -171,7 +173,7 @@ func (c *SMTPConn) handle(conn net.Conn) {
 				return
 			case ".":
 				c.data = false
-				c.writeStringWithLog("250 2.0.0 Ok: queued as AAAAAAAAAA")
+				c.writeStringWithLog("250 2.0.0 Ok: queued")
 			case "RSET":
 				c.writeStringWithLog("250 2.0.0 Ok")
 			case "NOOP":
@@ -193,10 +195,18 @@ func (c *SMTPConn) handle(conn net.Conn) {
 	}
 }
 
+func (c *SMTPConn) writeStringWithLog(str string) {
+	_, err := c.writer.WriteString(str + crlf)
+	if err != nil {
+		c.log.Printf("%s %s WriteString error: %#v", c.id, outgoing, err)
+	}
+	c.log.Printf("%s %s %s", c.id, outgoing, strings.ReplaceAll(str, crlf, "\\r\\n"))
+}
+
 func (c *SMTPConn) startTLS(conn net.Conn) {
 	cert, err := tls.LoadX509KeyPair("testdata/server.crt", "testdata/server.key")
 	if err != nil {
-		fmt.Printf("Error loading server certificate: %#v", err)
+		c.log.Printf("%s %s Error loading server certificate: %#v", c.id, "--", err)
 		return
 	}
 	tlsConfig := &tls.Config{Certificates: []tls.Certificate{cert}}
