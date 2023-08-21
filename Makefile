@@ -31,6 +31,10 @@ mysql-plugin:
 file-plugin:
 	env GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -buildmode=plugin -o plugin/file.so plugin/file/main.go
 
+key:
+	@rm -rf testdata/server.*
+	@openssl req -x509 -days 10 -newkey ED25519 -nodes -out ./testdata/server.crt -keyout ./testdata/server.key -subj "/C=/ST=/L=/O=/OU=/CN=example.local" &>/dev/null
+
 release:
 	@test -z $(GITHUB_TOKEN) || goreleaser --rm-dist
 
