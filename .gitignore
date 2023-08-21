@@ -1,3 +1,4 @@
 warp
 plugin/*.so
 dist/
+testdata/server.*
