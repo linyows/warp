@@ -119,7 +119,8 @@ func (s *Server) HandleConnection(conn net.Conn) {
 	p.afterConnHook = func() {
 		now := time.Now()
 		elapse := p.elapse()
-		s.log.Printf("%s from:%s to:%s elapse:%s", p.id, p.sMailAddr, p.rMailAddr, elapse)
+		b := fmt.Sprintf("from:%s to:%s elapse:%s", p.sMailAddr, p.rMailAddr, elapse)
+		s.log.Printf("%s %s %s", p.id, onPxy, b)
 		for _, hook := range s.Hooks {
 			hook.AfterConn(&AfterConnData{
 				ConnID:     p.id,
