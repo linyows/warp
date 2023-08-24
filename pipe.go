@@ -318,11 +318,11 @@ func (p *Pipe) close() func() {
 }
 
 func (p *Pipe) isResponseOfEHLOWithStartTLS(b []byte) bool {
-	return !p.tls && !p.locked && bytes.Contains(b, []byte("STARTTLS"))
+	return !p.tls && !p.locked && bytes.Contains(b, []byte(fmt.Sprint(codeActionCompleted))) && bytes.Contains(b, []byte("STARTTLS"))
 }
 
 func (p *Pipe) isResponseOfEHLOWithoutStartTLS(b []byte) bool {
-	return !p.tls && !p.locked && bytes.Contains(b, []byte(fmt.Sprint(codeActionCompleted)))
+	return !p.tls && !p.locked && bytes.Contains(b, []byte(fmt.Sprint(codeActionCompleted))) && !bytes.Contains(b, []byte("STARTTLS"))
 }
 
 func (p *Pipe) isResponseOfReadyToStartTLS(b []byte) bool {
