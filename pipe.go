@@ -35,7 +35,7 @@ type Pipe struct {
 	afterConnHook func()
 }
 
-type Mediator func([]byte, int) ([]byte, int)
+type Mediator func([]byte, int) ([]byte, int, bool)
 type Flow int
 type Data []byte
 type Direction string
@@ -87,7 +87,7 @@ func (p *Pipe) Do() {
 
 	// Sender --- packet --> Proxy
 	go func() {
-		_, err := p.copy(upstream, func(b []byte, i int) ([]byte, int) {
+		_, err := p.copy(upstream, func(b []byte, i int) ([]byte, int, bool) {
 			if !p.tls || p.rMailAddr == nil {
 				p.pairing(b[0:i])
 			}
@@ -100,7 +100,11 @@ func (p *Pipe) Do() {
 				p.readytls = false
 				go p.afterCommHook(b[0:i], srcToPxy)
 			}
-			return b, i
+			if p.locked {
+				p.waitForTLSConn(buf, nr)
+			}
+			go p.afterCommHook(p.removeMailBody(buf[0:nr]), srcToDst)
+			return b, i, false
 		})
 		if err != nil {
 			go p.afterCommHook([]byte(fmt.Sprintf("io copy error: %s", err.Error())), pxyToDst)
@@ -110,7 +114,7 @@ func (p *Pipe) Do() {
 
 	// Proxy <--- packet -- Receiver
 	go func() {
-		_, err := p.copy(downstream, func(b []byte, i int) ([]byte, int) {
+		_, err := p.copy(downstream, func(b []byte, i int) ([]byte, int, bool) {
 			if p.isResponseOfEHLOWithStartTLS(b) {
 				go p.afterCommHook(b[0:i], dstToPxy)
 				b, i = p.removeStartTLSCommand(b, i)
@@ -121,12 +125,27 @@ func (p *Pipe) Do() {
 					go p.afterCommHook([]byte(fmt.Sprintf("TLS connection error: %s", er.Error())), dstToPxy)
 				}
 			}
+
+			// time before email input
+			list := bytes.Split(buf, []byte(crlf))
+			for _, v := range list {
+				if len(v) >= 3 && string(v[:3]) == fmt.Sprint(codeStartingMailInput) {
+					p.timeAtDataStarting = time.Now()
+				}
+			}
+
+			// remove buffering ready response
+			if bytes.Contains(buf, []byte("Ready to start TLS")) || bytes.Contains(buf, []byte("SMTP server ready")) || bytes.Contains(buf, []byte("Start TLS")) {
+				continue
+			}
+
 			if p.isResponseOfEHLOWithoutStartTLS(b) {
 				go p.afterCommHook(b[0:i], pxyToSrc)
 			} else {
 				go p.afterCommHook(b[0:i], dstToSrc)
 			}
-			return b, i
+
+			return b, i, true
 		})
 		if err != nil {
 			go p.afterCommHook([]byte(fmt.Sprintf("io copy error: %s", err.Error())), dstToPxy)
@@ -182,34 +201,17 @@ func (p *Pipe) copy(dr Flow, fn Mediator) (written int64, err error) {
 	buf := make([]byte, bufferSize)
 
 	for {
+		var isContinue bool
 		if p.locked {
 			continue
 		}
 
 		nr, er := p.src(dr).Read(buf)
 		if nr > 0 {
-			buf, nr = fn(buf, nr)
-			if dr == upstream && p.locked {
-				p.waitForTLSConn(buf, nr)
-			}
-			if nr == 0 {
+			// Run the Mediator!
+			buf, nr, isContinue = fn(buf, nr)
+			if nr == 0 || isContinue {
 				continue
-			}
-			if dr == upstream {
-				go p.afterCommHook(p.removeMailBody(buf[0:nr]), srcToDst)
-			} else {
-				// time before email input
-				list := bytes.Split(buf, []byte(crlf))
-				for _, v := range list {
-					if len(v) >= 3 && string(v[:3]) == fmt.Sprint(codeStartingMailInput) {
-						p.timeAtDataStarting = time.Now()
-					}
-				}
-				// remove buffering ready response
-				if bytes.Contains(buf, []byte("Ready to start TLS")) || bytes.Contains(buf, []byte("SMTP server ready")) || bytes.Contains(buf, []byte("Start TLS")) {
-					continue
-				}
-				go p.afterCommHook(buf[0:nr], dstToSrc)
 			}
 			nw, ew := p.dst(dr).Write(buf[0:nr])
 			if nw > 0 {
