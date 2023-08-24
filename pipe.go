@@ -78,6 +78,66 @@ func (e Elapse) String() string {
 	return fmt.Sprintf("%d msec", e)
 }
 
+func (p *Pipe) mediateOnUpstream(b []byte, i int) ([]byte, int, bool) {
+	if !p.tls || p.rMailAddr == nil {
+		p.pairing(b[0:i])
+	}
+
+	if !p.tls && p.readytls {
+		p.locked = true
+		er := p.starttls()
+		if er != nil {
+			go p.afterCommHook([]byte(fmt.Sprintf("starttls error: %s", er.Error())), pxyToDst)
+		}
+		p.readytls = false
+		go p.afterCommHook(b[0:i], srcToPxy)
+	}
+
+	if p.locked {
+		p.waitForTLSConn(b, i)
+		go p.afterCommHook(b[0:i], pxyToDst)
+	} else {
+		go p.afterCommHook(p.removeMailBody(b[0:i]), srcToDst)
+	}
+
+	return b, i, false
+}
+
+func (p *Pipe) mediateOnDownstream(b []byte, i int) ([]byte, int, bool) {
+	if p.isResponseOfEHLOWithStartTLS(b) {
+		go p.afterCommHook(b[0:i], dstToPxy)
+		b, i = p.removeStartTLSCommand(b, i)
+	} else if p.isResponseOfReadyToStartTLS(b) {
+		go p.afterCommHook(b[0:i], dstToPxy)
+		er := p.connectTLS()
+		if er != nil {
+			go p.afterCommHook([]byte(fmt.Sprintf("TLS connection error: %s", er.Error())), dstToPxy)
+		}
+	}
+
+	// time before email input
+	list := bytes.Split(b, []byte(crlf))
+	for _, v := range list {
+		if len(v) >= 3 && string(v[:3]) == fmt.Sprint(codeStartingMailInput) {
+			p.timeAtDataStarting = time.Now()
+		}
+	}
+
+	// remove buffering ready response
+	if p.tls && !p.readytls && p.locked {
+		// continue
+		return b, i, true
+	}
+
+	if p.isResponseOfEHLOWithoutStartTLS(b) {
+		go p.afterCommHook(b[0:i], pxyToSrc)
+	} else {
+		go p.afterCommHook(b[0:i], dstToSrc)
+	}
+
+	return b, i, false
+}
+
 func (p *Pipe) Do() {
 	p.timeAtConnected = time.Now()
 	go p.afterCommHook([]byte(fmt.Sprintf("connected to %s", p.rAddr)), onPxy)
@@ -87,25 +147,7 @@ func (p *Pipe) Do() {
 
 	// Sender --- packet --> Proxy
 	go func() {
-		_, err := p.copy(upstream, func(b []byte, i int) ([]byte, int, bool) {
-			if !p.tls || p.rMailAddr == nil {
-				p.pairing(b[0:i])
-			}
-			if !p.tls && p.readytls {
-				p.locked = true
-				er := p.starttls()
-				if er != nil {
-					go p.afterCommHook([]byte(fmt.Sprintf("starttls error: %s", er.Error())), pxyToDst)
-				}
-				p.readytls = false
-				go p.afterCommHook(b[0:i], srcToPxy)
-			}
-			if p.locked {
-				p.waitForTLSConn(buf, nr)
-			}
-			go p.afterCommHook(p.removeMailBody(buf[0:nr]), srcToDst)
-			return b, i, false
-		})
+		_, err := p.copy(upstream, p.mediateOnUpstream)
 		if err != nil {
 			go p.afterCommHook([]byte(fmt.Sprintf("io copy error: %s", err.Error())), pxyToDst)
 		}
@@ -114,39 +156,7 @@ func (p *Pipe) Do() {
 
 	// Proxy <--- packet -- Receiver
 	go func() {
-		_, err := p.copy(downstream, func(b []byte, i int) ([]byte, int, bool) {
-			if p.isResponseOfEHLOWithStartTLS(b) {
-				go p.afterCommHook(b[0:i], dstToPxy)
-				b, i = p.removeStartTLSCommand(b, i)
-			} else if p.isResponseOfReadyToStartTLS(b) {
-				go p.afterCommHook(b[0:i], dstToPxy)
-				er := p.connectTLS()
-				if er != nil {
-					go p.afterCommHook([]byte(fmt.Sprintf("TLS connection error: %s", er.Error())), dstToPxy)
-				}
-			}
-
-			// time before email input
-			list := bytes.Split(buf, []byte(crlf))
-			for _, v := range list {
-				if len(v) >= 3 && string(v[:3]) == fmt.Sprint(codeStartingMailInput) {
-					p.timeAtDataStarting = time.Now()
-				}
-			}
-
-			// remove buffering ready response
-			if bytes.Contains(buf, []byte("Ready to start TLS")) || bytes.Contains(buf, []byte("SMTP server ready")) || bytes.Contains(buf, []byte("Start TLS")) {
-				continue
-			}
-
-			if p.isResponseOfEHLOWithoutStartTLS(b) {
-				go p.afterCommHook(b[0:i], pxyToSrc)
-			} else {
-				go p.afterCommHook(b[0:i], dstToSrc)
-			}
-
-			return b, i, true
-		})
+		_, err := p.copy(downstream, p.mediateOnDownstream)
 		if err != nil {
 			go p.afterCommHook([]byte(fmt.Sprintf("io copy error: %s", err.Error())), dstToPxy)
 		}
