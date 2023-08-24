@@ -52,7 +52,7 @@ const (
 	srcToPxy Direction = ">|"
 	pxyToDst Direction = "|>"
 	dstToPxy Direction = "|<"
-	//pxyToSrc Direction = "<|"
+	pxyToSrc Direction = "<|"
 	srcToDst Direction = "->"
 	dstToSrc Direction = "<-"
 	onPxy    Direction = "--"
@@ -63,7 +63,7 @@ const (
 	// SMTP response codes
 	codeServiceReady      int = 220
 	codeStartingMailInput int = 354
-	//codeActionCompleted int = 250
+	codeActionCompleted   int = 250
 )
 
 var (
@@ -120,6 +120,11 @@ func (p *Pipe) Do() {
 				if er != nil {
 					go p.afterCommHook([]byte(fmt.Sprintf("TLS connection error: %s", er.Error())), dstToPxy)
 				}
+			}
+			if p.isResponseOfEHLOWithoutStartTLS(b) {
+				go p.afterCommHook(b[0:i], pxyToSrc)
+			} else {
+				go p.afterCommHook(b[0:i], dstToSrc)
 			}
 			return b, i
 		})
@@ -302,6 +307,10 @@ func (p *Pipe) close() func() {
 
 func (p *Pipe) isResponseOfEHLOWithStartTLS(b []byte) bool {
 	return !p.tls && !p.locked && bytes.Contains(b, []byte("STARTTLS"))
+}
+
+func (p *Pipe) isResponseOfEHLOWithoutStartTLS(b []byte) bool {
+	return !p.tls && !p.locked && bytes.Contains(b, []byte(fmt.Sprint(codeActionCompleted)))
 }
 
 func (p *Pipe) isResponseOfReadyToStartTLS(b []byte) bool {
