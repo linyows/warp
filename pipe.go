@@ -79,8 +79,12 @@ func (e Elapse) String() string {
 }
 
 func (p *Pipe) mediateOnUpstream(b []byte, i int) ([]byte, int, bool) {
+	data := b[0:i]
+
 	if !p.tls || p.rMailAddr == nil {
-		p.pairing(b[0:i])
+		p.setSenderMailAddress(data)
+		p.setSenderServerName(data)
+		p.setReceiverMailAddressAndServerName(data)
 	}
 
 	if !p.tls && p.readytls {
@@ -90,14 +94,14 @@ func (p *Pipe) mediateOnUpstream(b []byte, i int) ([]byte, int, bool) {
 			go p.afterCommHook([]byte(fmt.Sprintf("starttls error: %s", er.Error())), pxyToDst)
 		}
 		p.readytls = false
-		go p.afterCommHook(b[0:i], srcToPxy)
+		go p.afterCommHook(data, srcToPxy)
 	}
 
 	if p.locked {
 		p.waitForTLSConn(b, i)
-		go p.afterCommHook(b[0:i], pxyToDst)
+		go p.afterCommHook(data, pxyToDst)
 	} else {
-		go p.afterCommHook(p.removeMailBody(b[0:i]), srcToDst)
+		go p.afterCommHook(p.removeMailBody(data), srcToDst)
 	}
 
 	return b, i, false
@@ -164,16 +168,22 @@ func (p *Pipe) Do() {
 	}()
 }
 
-func (p *Pipe) pairing(b []byte) {
+func (p *Pipe) setSenderServerName(b []byte) {
 	if bytes.Contains(b, []byte("HELO")) {
 		p.sServerName = bytes.TrimSpace(bytes.Replace(b, []byte("HELO"), []byte(""), 1))
 	}
 	if bytes.Contains(b, []byte("EHLO")) {
 		p.sServerName = bytes.TrimSpace(bytes.Replace(b, []byte("EHLO"), []byte(""), 1))
 	}
+}
+
+func (p *Pipe) setSenderMailAddress(b []byte) {
 	if bytes.Contains(b, []byte(mailFromPrefix)) {
 		p.sMailAddr = bytes.Replace(mailFromRegex.Find(b), []byte(mailFromPrefix), []byte(""), 1)
 	}
+}
+
+func (p *Pipe) setReceiverMailAddressAndServerName(b []byte) {
 	if bytes.Contains(b, []byte(rcptToPrefix)) {
 		p.rMailAddr = bytes.Replace(mailToRegex.Find(b), []byte(rcptToPrefix), []byte(""), 1)
 		p.rServerName = bytes.Split(p.rMailAddr, []byte("@"))[1]
