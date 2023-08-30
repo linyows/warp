@@ -108,11 +108,13 @@ func (p *Pipe) mediateOnUpstream(b []byte, i int) ([]byte, int, bool) {
 }
 
 func (p *Pipe) mediateOnDownstream(b []byte, i int) ([]byte, int, bool) {
+	data := b[0:i]
+
 	if p.isResponseOfEHLOWithStartTLS(b) {
-		go p.afterCommHook(b[0:i], dstToPxy)
+		go p.afterCommHook(data, dstToPxy)
 		b, i = p.removeStartTLSCommand(b, i)
 	} else if p.isResponseOfReadyToStartTLS(b) {
-		go p.afterCommHook(b[0:i], dstToPxy)
+		go p.afterCommHook(data, dstToPxy)
 		er := p.connectTLS()
 		if er != nil {
 			go p.afterCommHook([]byte(fmt.Sprintf("TLS connection error: %s", er.Error())), dstToPxy)
@@ -120,12 +122,7 @@ func (p *Pipe) mediateOnDownstream(b []byte, i int) ([]byte, int, bool) {
 	}
 
 	// time before email input
-	list := bytes.Split(b, []byte(crlf))
-	for _, v := range list {
-		if len(v) >= 3 && string(v[:3]) == fmt.Sprint(codeStartingMailInput) {
-			p.timeAtDataStarting = time.Now()
-		}
-	}
+	p.setTimeAtDataStarting(b)
 
 	// remove buffering ready response
 	if p.tls && !p.readytls && p.locked {
@@ -134,12 +131,21 @@ func (p *Pipe) mediateOnDownstream(b []byte, i int) ([]byte, int, bool) {
 	}
 
 	if p.isResponseOfEHLOWithoutStartTLS(b) {
-		go p.afterCommHook(b[0:i], pxyToSrc)
+		go p.afterCommHook(data, pxyToSrc)
 	} else {
-		go p.afterCommHook(b[0:i], dstToSrc)
+		go p.afterCommHook(data, dstToSrc)
 	}
 
 	return b, i, false
+}
+
+func (p *Pipe) setTimeAtDataStarting(b []byte) {
+	list := bytes.Split(b, []byte(crlf))
+	for _, v := range list {
+		if len(v) >= 3 && string(v[:3]) == fmt.Sprint(codeStartingMailInput) {
+			p.timeAtDataStarting = time.Now()
+		}
+	}
 }
 
 func (p *Pipe) Do() {
