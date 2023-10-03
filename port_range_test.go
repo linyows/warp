@@ -16,7 +16,7 @@ func listenLocalPort(t *testing.T) (net.Listener, int) {
 		for {
 			conn, _ := ln.Accept()
 			if conn != nil {
-				defer conn.Close()
+				conn.Close()
 			}
 		}
 	}()
