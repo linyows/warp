@@ -12,10 +12,11 @@ import (
 const SO_ORIGINAL_DST = 80
 
 type Server struct {
-	Addr  string
-	Port  int
-	Hooks []Hook
-	log   *log.Logger
+	Addr          string
+	Port          int
+	Hooks         []Hook
+	OutboundPorts *PortRange
+	log           *log.Logger
 }
 
 // These are global variables for integration test.
@@ -86,7 +87,16 @@ func (s *Server) HandleConnection(conn net.Conn) {
 		}
 	}()
 
-	laddr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:0", s.Addr))
+	outboundPort := 0
+	if s.OutboundPorts != nil {
+		outboundPort, err = s.OutboundPorts.TakeOut(s.Addr)
+		if err != nil {
+			s.log.Printf("%s %s outbound ports take out error: %#v", uuid, onPxy, err)
+			return
+		}
+	}
+
+	laddr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:%d", s.Addr, outboundPort))
 	if err != nil {
 		s.log.Printf("%s %s resolve tcp addr error: %#v", uuid, onPxy, err)
 		return
