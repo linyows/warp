@@ -43,13 +43,13 @@ func TestTakeOut(t *testing.T) {
 	start := port - 10
 	end := port + 10
 
-	r1 := &PortRange{start: start, end: end}
+	r1 := &PortRange{Start: start, End: end}
 	got1, err := r1.TakeOut(ip)
 	if start != got1 || err != nil {
 		t.Errorf("port range take out expected %d, but got %d", start, got1)
 	}
 
-	r2 := &PortRange{start: port, end: port}
+	r2 := &PortRange{Start: port, End: port}
 	got2, err := r2.TakeOut(ip)
 	if 0 != got2 || err == nil {
 		t.Error("port range take out expected error, but got no error")
