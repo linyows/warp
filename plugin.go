@@ -18,6 +18,7 @@ const (
 )
 
 type Hook interface {
+	AfterInit()
 	AfterComm(*AfterCommData)
 	AfterConn(*AfterConnData)
 }
@@ -85,6 +86,7 @@ func loadPlugins() ([]Hook, error) {
 			continue
 		}
 
+		plug.AfterInit()
 		plugins = append(plugins, plug)
 	}
 
