@@ -38,7 +38,7 @@ func (s *Sqlite) Conn() (*sql.DB, error) {
 
 	dsn := os.Getenv("DSN")
 	if len(dsn) == 0 {
-		return nil, fmt.Errorf("missing dsn for mysql, please set `DSN`")
+		return nil, fmt.Errorf("missing dsn for sqlite, please set `DSN`")
 	}
 
 	var err error
