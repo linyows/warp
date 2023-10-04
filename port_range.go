@@ -17,7 +17,7 @@ func (p *PortRange) TakeOut() (int, error) {
 		// Incremental port checks is port duplicate, when consecutive send. so using random port checks.
 		port := p.Start + rand.Intn(diff)
 		if ok := isPortAvailable(port); ok {
-			return i, nil
+			return port, nil
 		}
 	}
 	return 0, fmt.Errorf("not found open port by %d-%d", p.Start, p.End)

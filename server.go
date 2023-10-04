@@ -51,7 +51,7 @@ func (s *Server) Start() error {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
-			s.log.Printf("accept error(is the warp port open globally?): %#v", err)
+			s.log.Printf("accept error(is the warp port open globally?): %s(%#v)", err.Error(), err)
 			continue
 		}
 		if s.Addr == conn.RemoteAddr().String() {
@@ -91,20 +91,20 @@ func (s *Server) HandleConnection(conn net.Conn) {
 	if s.OutboundPorts != nil {
 		outboundPort, err = s.OutboundPorts.TakeOut()
 		if err != nil {
-			s.log.Printf("%s %s outbound ports take out error: %#v", uuid, onPxy, err)
+			s.log.Printf("%s %s outbound ports take out error: %s(%#v)", uuid, onPxy, err.Error(), err)
 			return
 		}
 	}
 
 	laddr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:%d", s.Addr, outboundPort))
 	if err != nil {
-		s.log.Printf("%s %s resolve tcp addr error: %#v", uuid, onPxy, err)
+		s.log.Printf("%s %s resolve tcp addr error: %s(%#v)", uuid, onPxy, err.Error(), err)
 		return
 	}
 	dialer := &net.Dialer{LocalAddr: laddr}
 	dstConn, err := dialer.Dial("tcp", raddr.String())
 	if err != nil {
-		s.log.Printf("%s %s dial `%s` with `%s` error: %#v", uuid, onPxy, raddr, laddr, err)
+		s.log.Printf("%s %s dial `%s` with `%s` error: %s(%#v)", uuid, onPxy, raddr, laddr, err.Error(), err)
 		return
 	}
 
