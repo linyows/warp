@@ -18,6 +18,7 @@ var (
 	builtBy = ""
 	ip      = flag.String("ip", "127.0.0.1", "listen ip")
 	port    = flag.Int("port", 0, "listen port")
+	oip     = flag.String("oip", "", "outbound ip")
 	opr     = flag.String("opr", "", "outbound port range: 12000-12500")
 	verFlag = flag.Bool("version", false, "show build version")
 	oprRe   = regexp.MustCompile(`^([1-9][0-9]{0,5})-([1-9][0-9]{0,5})$`)
@@ -33,7 +34,11 @@ func main() {
 		return
 	}
 
-	w := &warp.Server{Addr: *ip, Port: *port}
+	w := &warp.Server{
+		Addr:         *ip,
+		Port:         *port,
+		OutboundAddr: *oip,
+	}
 
 	trimedOpr := strings.TrimSpace(*opr)
 	if trimedOpr != "" {
