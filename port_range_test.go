@@ -7,7 +7,7 @@ import (
 )
 
 func TestTakeOut(t *testing.T) {
-	port := 35555
+	port := 30000
 	start := port - 10
 	end := port + 10
 
@@ -20,8 +20,8 @@ func TestTakeOut(t *testing.T) {
 }
 
 func TestIsPortAvailable(t *testing.T) {
-	used := 35555
-	unused := 36666
+	used := 30001
+	unused := 30002
 
 	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", used))
 	if err != nil {
