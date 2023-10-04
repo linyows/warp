@@ -4,9 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"regexp"
-	"strconv"
-	"strings"
 
 	"github.com/linyows/warp"
 )
@@ -18,10 +15,8 @@ var (
 	builtBy = ""
 	ip      = flag.String("ip", "127.0.0.1", "listen ip")
 	port    = flag.Int("port", 0, "listen port")
-	oip     = flag.String("oip", "", "outbound ip")
-	opr     = flag.String("opr", "", "outbound port range: 12000-12500")
+	oip     = flag.String("outbound-ip", "0.0.0.0", "outbound ip")
 	verFlag = flag.Bool("version", false, "show build version")
-	oprRe   = regexp.MustCompile(`^([1-9][0-9]{0,5})-([1-9][0-9]{0,5})$`)
 )
 
 func init() {
@@ -38,22 +33,6 @@ func main() {
 		Addr:         *ip,
 		Port:         *port,
 		OutboundAddr: *oip,
-	}
-
-	trimedOpr := strings.TrimSpace(*opr)
-	if trimedOpr != "" {
-		matched := oprRe.FindStringSubmatch(trimedOpr)
-		if len(matched) == 3 {
-			s, _ := strconv.Atoi(matched[1])
-			e, _ := strconv.Atoi(matched[2])
-			w.OutboundPorts = &warp.PortRange{
-				Start: s,
-				End:   e,
-			}
-		} else {
-			fmt.Fprintf(os.Stderr, "outbound-port-range option format is <number>-<number>\n")
-			return
-		}
 	}
 
 	err := w.Start()
