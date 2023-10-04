@@ -114,6 +114,10 @@ Native Plugins:
     ```sh
     export DSN="warp:PASSWORD@tcp(localhost:3306)/warp"
     ```
+- SQLite
+    ```sh
+    export DSN="/var/db/warp.sqlite3"
+    ```
 - File
     ```sh
     export FILE_PATH="/tmp/warp.log"
@@ -166,17 +170,6 @@ mysql> select communications.occurred_at, direction as d, substring(data, 1, 40)
 +----------------------------+----+------------------------------------------+
 17 rows in set (0.00 sec)
 ```
-
-Contribution
---
-
-1. Fork ([https://github.com/linyows/warp/fork](https://github.com/linyows/warp/fork))
-1. Create a feature branch
-1. Commit your changes
-1. Rebase your local changes against the main branch
-1. Run test suite with the `go test ./...` command and confirm that it passes
-1. Run `gofmt -s`
-1. Create a new Pull Request
 
 Author
 --
