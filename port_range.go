@@ -24,6 +24,10 @@ func (p *PortRange) TakeOut() (int, error) {
 }
 
 func isPortAvailable(port int) bool {
-	_, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
-	return err == nil
+	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	if err != nil {
+		return false
+	}
+	defer ln.Close()
+	return true
 }
