@@ -89,7 +89,7 @@ func (s *Server) HandleConnection(conn net.Conn) {
 
 	outboundPort := 0
 	if s.OutboundPorts != nil {
-		outboundPort, err = s.OutboundPorts.TakeOut(s.Addr)
+		outboundPort, err = s.OutboundPorts.TakeOut()
 		if err != nil {
 			s.log.Printf("%s %s outbound ports take out error: %#v", uuid, onPxy, err)
 			return
@@ -104,7 +104,7 @@ func (s *Server) HandleConnection(conn net.Conn) {
 	dialer := &net.Dialer{LocalAddr: laddr}
 	dstConn, err := dialer.Dial("tcp", raddr.String())
 	if err != nil {
-		s.log.Printf("%s %s dial `%s` error: %#v", uuid, onPxy, raddr, err)
+		s.log.Printf("%s %s dial `%s` with `%s` error: %#v", uuid, onPxy, raddr, laddr, err)
 		return
 	}
 

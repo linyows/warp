@@ -2,9 +2,8 @@ package warp
 
 import (
 	"fmt"
+	"math/rand"
 	"net"
-	"strconv"
-	"time"
 )
 
 type PortRange struct {
@@ -12,23 +11,19 @@ type PortRange struct {
 	End   int
 }
 
-func (p *PortRange) TakeOut(host string) (int, error) {
-	timeout := time.Second
-
+func (p *PortRange) TakeOut() (int, error) {
+	diff := p.End - p.Start
 	for i := p.Start; i <= p.End; i++ {
-		address := net.JoinHostPort(host, strconv.Itoa(i))
-		if ok := isAvailablePort(address, timeout); ok {
+		// Incremental port checks is port duplicate, when consecutive send. so using random port checks.
+		port := p.Start + rand.Intn(diff)
+		if ok := isPortAvailable(port); ok {
 			return i, nil
 		}
 	}
-
 	return 0, fmt.Errorf("not found open port by %d-%d", p.Start, p.End)
 }
 
-func isAvailablePort(address string, timeout time.Duration) bool {
-	conn, err := net.DialTimeout("tcp", address, timeout)
-	if conn != nil {
-		defer conn.Close()
-	}
-	return err != nil
+func isPortAvailable(port int) bool {
+	_, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	return err == nil
 }
