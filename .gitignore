@@ -2,3 +2,4 @@ warp
 plugin/*.so
 dist/
 testdata/server.*
+testdata/warp.sqlite
