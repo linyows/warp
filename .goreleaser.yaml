@@ -27,10 +27,8 @@ builds:
     no_main_check: true
     goos:
       - linux
-      - darwin
     goarch:
       - amd64
-      - arm64
   - env:
       - CGO_ENABLED=1
     id: warp-sqlite-plugin
@@ -39,10 +37,8 @@ builds:
     no_main_check: true
     goos:
       - linux
-      - darwin
     goarch:
       - amd64
-      - arm64
   - env:
       - CGO_ENABLED=1
     id: warp-file-plugin
@@ -51,10 +47,8 @@ builds:
     no_main_check: true
     goos:
       - linux
-      - darwin
     goarch:
       - amd64
-      - arm64
 
 archives:
   - format: tar.gz
