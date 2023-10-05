@@ -30,11 +30,11 @@ func (s *Server) Start() error {
 		s.log = log.New(os.Stderr, "", log.Ldate|log.Ltime|log.Lmicroseconds)
 	}
 
-	hooks, err := loadPlugins()
-	if err != nil {
+	pl := &Plugins{}
+	if err := pl.load(); err != nil {
 		return err
 	}
-	s.Hooks = hooks
+	s.Hooks = pl.hooks
 
 	addr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:%d", s.Addr, s.Port))
 	if err != nil {

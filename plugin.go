@@ -12,7 +12,6 @@ import (
 )
 
 const (
-	pluginDirName string = "plugin"
 	pluginVarName string = "Hook"
 	TimeFormat    string = "2006-01-02T15:04:05.999999"
 )
@@ -38,14 +37,27 @@ type AfterConnData struct {
 	Elapse
 }
 
-func pluginDirExists() bool {
-	_, err := os.Stat(pluginDirName)
+type Plugins struct {
+	path  string
+	hooks []Hook
+}
+
+func (p *Plugins) isDirExists() bool {
+	_, err := os.Stat(p.path)
 	return err == nil
 }
 
-func loadPlugin(name string) (Hook, error) {
-	p := path.Join(pluginDirName, name)
-	plug, err := plugin.Open(p)
+func (p *Plugins) setPath() {
+	p.path = "/opt/warp/plugin"
+	path := os.Getenv("PLUGIN_PATH")
+	if path != "" {
+		p.path = path
+	}
+}
+
+func (p *Plugins) lookup(name string) (Hook, error) {
+	pp := path.Join(p.path, name)
+	plug, err := plugin.Open(pp)
 	if err != nil {
 		return nil, err
 	}
@@ -55,20 +67,20 @@ func loadPlugin(name string) (Hook, error) {
 		return nil, err
 	}
 
-	log.Printf("plugin loaded: %s", p)
+	log.Printf("plugin loaded: %s", pp)
 	return symbol.(Hook), nil
 }
 
-func loadPlugins() ([]Hook, error) {
-	var plugins []Hook
+func (p *Plugins) load() error {
+	p.setPath()
 
-	if !pluginDirExists() {
-		return plugins, nil
+	if !p.isDirExists() {
+		return nil
 	}
 
-	files, err := ioutil.ReadDir(pluginDirName)
+	files, err := ioutil.ReadDir(p.path)
 	if err != nil {
-		return plugins, err
+		return err
 	}
 
 	for _, f := range files {
@@ -80,15 +92,15 @@ func loadPlugins() ([]Hook, error) {
 			continue
 		}
 
-		plug, err := loadPlugin(n)
+		plug, err := p.lookup(n)
 		if err != nil {
 			fmt.Printf("plugin load error(%s): %#v\n", n, err)
 			continue
 		}
 
 		plug.AfterInit()
-		plugins = append(plugins, plug)
+		p.hooks = append(p.hooks, plug)
 	}
 
-	return plugins, nil
+	return nil
 }
