@@ -11,44 +11,61 @@ builds:
       - CGO_ENABLED=0
     id: warp
     main: ./cmd/warp
-    goos: [linux]
-    goarch: [amd64]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
     ldflags:
       - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{ .CommitDate }} -X main.builtBy=goreleaser
   - env:
       - CGO_ENABLED=1
-    id: warp-plugin-mysql
+    id: mysql
     main: ./plugins/mysql/...
     buildmode: plugin
     no_main_check: true
     binary: warp-plugin-mysql.so
     goos: [linux]
-    goarch: [amd64]
+    goarch: [amd64, arm64]
   - env:
       - CGO_ENABLED=1
-    id: warp-plugin-sqlite
+    id: sqlite
     main: ./plugins/sqlite/...
     buildmode: plugin
     no_main_check: true
     binary: warp-plugin-sqlite.so
     goos: [linux]
-    goarch: [amd64]
+    goarch: [amd64, arm64]
   - env:
       - CGO_ENABLED=1
-    id: warp-plugin-file
+    id: file
     main: ./plugins/file/...
     buildmode: plugin
     no_main_check: true
     binary: warp-plugin-file.so
     goos: [linux]
-    goarch: [amd64]
+    goarch: [amd64, arm64]
 
 archives:
-  - format: tar.gz
+  - id: warp
+    builds: [warp]
+    format: tar.gz
     # this name template makes the OS and Arch compatible with the results of uname.
     name_template: >-
       {{ .ProjectName }}_
-      {{- title .Os }}_
+      {{- .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+    # use zip for windows archives
+    format_overrides:
+    - goos: windows
+      format: zip
+  - id: warp-plugins
+    builds: [mysql, sqlite, file]
+    format: tar.gz
+    # this name template makes the OS and Arch compatible with the results of uname.
+    name_template: >-
+      {{ .ProjectName }}_plugins_
+      {{- .Os }}_
       {{- if eq .Arch "amd64" }}x86_64
       {{- else if eq .Arch "386" }}i386
       {{- else }}{{ .Arch }}{{ end }}
