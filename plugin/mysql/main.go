@@ -38,6 +38,9 @@ func (m *Mysql) Conn() (*sql.DB, error) {
 	return m.pool, nil
 }
 
+func (m *Mysql) AfterInit() {
+}
+
 func (m *Mysql) AfterComm(d *warp.AfterCommData) {
 	conn, err := m.Conn()
 	if err != nil {

@@ -40,6 +40,9 @@ func (f *File) writer() (io.Writer, error) {
 	return f.file, nil
 }
 
+func (f *File) AfterInit() {
+}
+
 func (f *File) AfterComm(d *warp.AfterCommData) {
 	writer, err := f.writer()
 	if err != nil {

@@ -28,6 +28,9 @@ test-all:
 mysql-plugin:
 	env GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -buildmode=plugin -o plugin/mysql.so plugin/mysql/main.go
 
+sqlite-plugin:
+	env GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -buildmode=plugin -o plugin/sqlite.so plugin/sqlite/main.go
+
 file-plugin:
 	env GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -buildmode=plugin -o plugin/file.so plugin/file/main.go
 
