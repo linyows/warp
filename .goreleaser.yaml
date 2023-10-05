@@ -17,26 +17,29 @@ builds:
       - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{ .CommitDate }} -X main.builtBy=goreleaser
   - env:
       - CGO_ENABLED=1
-    id: warp-mysql-plugin
+    id: warp-plugin-mysql
     main: ./plugins/mysql/...
     buildmode: plugin
     no_main_check: true
+    binary: warp-plugin-mysql.so
     goos: [linux]
     goarch: [amd64]
   - env:
       - CGO_ENABLED=1
-    id: warp-sqlite-plugin
+    id: warp-plugin-sqlite
     main: ./plugins/sqlite/...
     buildmode: plugin
     no_main_check: true
+    binary: warp-plugin-sqlite.so
     goos: [linux]
     goarch: [amd64]
   - env:
       - CGO_ENABLED=1
-    id: warp-file-plugin
+    id: warp-plugin-file
     main: ./plugins/file/...
     buildmode: plugin
     no_main_check: true
+    binary: warp-plugin-file.so
     goos: [linux]
     goarch: [amd64]
 
