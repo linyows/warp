@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql/driver"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -106,4 +107,41 @@ func TestAfterConn(t *testing.T) {
 
 	sqlite := Sqlite{pool: db}
 	sqlite.AfterConn(data)
+}
+
+func TestIntegration(t *testing.T) {
+	err := os.Setenv("DSN", "../../testdata/warp.sqlite")
+	if err != nil {
+		t.Fatalf("Setenv error: '%s'", err)
+	}
+
+	sqlite := &Sqlite{}
+	sqlite.AfterInit()
+
+	id := warp.GenID().String()
+
+	sqlite.AfterComm(&warp.AfterCommData{
+		ConnID:     id,
+		OccurredAt: time.Now(),
+		Data:       []byte("hello"),
+		Direction:  "->",
+	})
+
+	sqlite.AfterConn(&warp.AfterConnData{
+		ConnID:     id,
+		OccurredAt: time.Now(),
+		MailFrom:   []byte("alice@example.local"),
+		MailTo:     []byte("bob@example.test"),
+		Elapse:     1234,
+	})
+
+	row := sqlite.pool.QueryRow(`select data from communications where connection_id = $1`, id)
+	if row == nil {
+		t.Fatalf("sqlite QueryRow error: '%s'", err)
+	}
+	var res string
+	err = row.Scan(&res)
+	if err != nil {
+		t.Error("Failed to db.Scan:", err)
+	}
 }

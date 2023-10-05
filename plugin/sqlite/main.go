@@ -14,17 +14,17 @@ const (
 	commQuery       string = "insert into communications (id, connection_id, occurred_at, direction, data) values ($1, $2, $3, $4, $5)"
 	connQuery       string = "insert into connections (id, occurred_at, mail_from, mail_to, elapse) values ($1, $2, $3, $4, $5)"
 	connCreateTable string = `create table if not exists connections (
-    id primary varchar(26) not null default '',
-    mail_from varchar(512) default null,
-    mail_to varchar(512) default null,
-    occurred_at timestamp(6) not null default CURRENT_TIMESTAMP(6),
-    elapse bigint)`
+    id text primary key,
+    mail_from text,
+    mail_to text,
+    occurred_at datetime default CURRENT_TIMESTAMP,
+    elapse integer);`
 	commCreateTable string = `create table if not exists communications (
-    id primary varchar(26) not null default '',
-    connection_id varchar(26) not null default '',
-    direction varchar(2) not null default '',
+    id text primary key,
+    connection_id text,
+    direction text,
     data text,
-    occurred_at timestamp(6) not null default CURRENT_TIMESTAMP(6))`
+    occurred_at datetime default CURRENT_TIMESTAMP)`
 )
 
 type Sqlite struct {
