@@ -8,4 +8,4 @@ require (
 	github.com/oklog/ulid v1.3.1
 )
 
-require github.com/mattn/go-sqlite3 v1.14.17 // indirect
+require github.com/mattn/go-sqlite3 v1.14.17
