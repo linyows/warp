@@ -48,7 +48,7 @@ func (p *Plugins) isDirExists() bool {
 }
 
 func (p *Plugins) setPath() {
-	p.path = "/opt/warp/plugin"
+	p.path = "/opt/warp/plugins"
 	path := os.Getenv("PLUGIN_PATH")
 	if path != "" {
 		p.path = path
@@ -94,7 +94,7 @@ func (p *Plugins) load() error {
 
 		plug, err := p.lookup(n)
 		if err != nil {
-			fmt.Printf("plugin load error(%s): %#v\n", n, err)
+			fmt.Printf("plugin load error(%s): %s\n", n, err)
 			continue
 		}
 
