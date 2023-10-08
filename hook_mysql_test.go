@@ -27,13 +27,13 @@ func TestHookMysqlConst(t *testing.T) {
 	}
 }
 
-func TestHookMysqlPrefix(t *testing.T) {
+func TestHookMysqlName(t *testing.T) {
 	mysql := &HookMysql{}
 	var expect string
 	var got string
 
 	expect = "mysql"
-	got = mysql.prefix()
+	got = mysql.Name()
 	if got != expect {
 		t.Errorf("expected %s, got %s", expect, got)
 	}

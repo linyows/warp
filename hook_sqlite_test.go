@@ -27,10 +27,10 @@ func TestHookSqliteConst(t *testing.T) {
 	}
 }
 
-func TestHookSqlitePrefix(t *testing.T) {
+func TestHookSqliteName(t *testing.T) {
 	sqlite := &HookSqlite{}
 	expect := "sqlite"
-	got := sqlite.prefix()
+	got := sqlite.Name()
 	if got != expect {
 		t.Errorf("expected %s, got %s", expect, got)
 	}

@@ -35,6 +35,10 @@ func (s *Server) Start() error {
 		return err
 	}
 	s.Hooks = append(s.Hooks, pl.hooks...)
+	for _, hook := range s.Hooks {
+		s.log.Printf("use %s hook", hook.Name())
+		hook.AfterInit()
+	}
 
 	addr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:%d", s.Addr, s.Port))
 	if err != nil {
