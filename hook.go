@@ -5,6 +5,7 @@ import (
 )
 
 type Hook interface {
+	Name() string
 	AfterInit()
 	AfterComm(*AfterCommData)
 	AfterConn(*AfterConnData)

@@ -31,7 +31,7 @@ type HookSqlite struct {
 	pool *sql.DB // Database connection pool.
 }
 
-func (h *HookSqlite) prefix() string {
+func (h *HookSqlite) Name() string {
 	return "sqlite"
 }
 
@@ -57,25 +57,25 @@ func (h *HookSqlite) conn() (*sql.DB, error) {
 func (h *HookSqlite) AfterInit() {
 	conn, err := h.conn()
 	if err != nil {
-		fmt.Printf("[%s] %s\n", h.prefix(), err)
+		fmt.Printf("[%s] %s\n", h.Name(), err)
 		return
 	}
 
 	_, err = conn.Exec(sqliteConnCreateTable)
 	if err != nil {
-		fmt.Printf("[%s] db exec error: %s\n", h.prefix(), err)
+		fmt.Printf("[%s] db exec error: %s\n", h.Name(), err)
 	}
 
 	_, err = conn.Exec(sqliteCommCreateTable)
 	if err != nil {
-		fmt.Printf("[%s] db exec error: %s\n", h.prefix(), err)
+		fmt.Printf("[%s] db exec error: %s\n", h.Name(), err)
 	}
 }
 
 func (h *HookSqlite) AfterComm(d *AfterCommData) {
 	conn, err := h.conn()
 	if err != nil {
-		fmt.Printf("[%s] %s\n", h.prefix(), err)
+		fmt.Printf("[%s] %s\n", h.Name(), err)
 		return
 	}
 
@@ -88,14 +88,14 @@ func (h *HookSqlite) AfterComm(d *AfterCommData) {
 		d.Data,
 	)
 	if err != nil {
-		fmt.Printf("[%s] db exec error: %s\n", h.prefix(), err)
+		fmt.Printf("[%s] db exec error: %s\n", h.Name(), err)
 	}
 }
 
 func (h *HookSqlite) AfterConn(d *AfterConnData) {
 	conn, err := h.conn()
 	if err != nil {
-		fmt.Printf("[%s] %s\n", h.prefix(), err)
+		fmt.Printf("[%s] %s\n", h.Name(), err)
 		return
 	}
 
@@ -108,6 +108,6 @@ func (h *HookSqlite) AfterConn(d *AfterConnData) {
 		d.Elapse,
 	)
 	if err != nil {
-		fmt.Printf("[%s] db exec error: %s\n", h.prefix(), err)
+		fmt.Printf("[%s] db exec error: %s\n", h.Name(), err)
 	}
 }

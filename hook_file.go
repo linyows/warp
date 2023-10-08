@@ -18,7 +18,7 @@ type HookFile struct {
 	file io.Writer
 }
 
-func (h *HookFile) prefix() string {
+func (h *HookFile) Name() string {
 	return "file"
 }
 
@@ -47,23 +47,23 @@ func (h *HookFile) AfterInit() {
 func (h *HookFile) AfterComm(d *AfterCommData) {
 	writer, err := h.writer()
 	if err != nil {
-		fmt.Printf("[%s] %s\n", h.prefix(), err)
+		fmt.Printf("[%s] %s\n", h.Name(), err)
 		return
 	}
 
 	if _, err := fmt.Fprintf(writer, fileCommJson, d.OccurredAt.Format(time.RFC3339), d.ConnID, d.Direction, d.Data); err != nil {
-		fmt.Printf("[%s] file append error: %s\n", h.prefix(), err)
+		fmt.Printf("[%s] file append error: %s\n", h.Name(), err)
 	}
 }
 
 func (h *HookFile) AfterConn(d *AfterConnData) {
 	writer, err := h.writer()
 	if err != nil {
-		fmt.Printf("[%s] %s\n", h.prefix(), err)
+		fmt.Printf("[%s] %s\n", h.Name(), err)
 		return
 	}
 
 	if _, err := fmt.Fprintf(writer, fileConnJson, d.OccurredAt.Format(time.RFC3339), d.ConnID, d.MailFrom, d.MailTo, d.Elapse); err != nil {
-		fmt.Printf("[%s] file append error: %s\n", h.prefix(), err)
+		fmt.Printf("[%s] file append error: %s\n", h.Name(), err)
 	}
 }

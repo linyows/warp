@@ -11,7 +11,7 @@ setup:
 	go mod download
 
 build:
-	env GOOS=$(GOOS) GOARCH=$(GOARCH) go build -o warp ./cmd/warp/main.go
+	env GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -o warp ./cmd/warp/main.go
 
 run:
 	env GOOS=$(GOOS) GOARCH=$(GOARCH) go run ./cmd/warp/main.go
@@ -25,14 +25,8 @@ integration: key
 test-all:
 	go test $(TEST_OPTIONS) -failfast -race -coverpkg=./... -covermode=atomic -coverprofile=coverage.txt $(SOURCE_FILES) -run $(TEST_PATTERN) -timeout=5m
 
-mysql-plugin:
-	env GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -buildmode=plugin -o plugins/mysql.so plugins/mysql/main.go
-
-sqlite-plugin:
-	env GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -buildmode=plugin -o plugins/sqlite.so plugins/sqlite/main.go
-
-file-plugin:
-	env GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -buildmode=plugin -o plugins/file.so plugins/file/main.go
+slqck-plugin:
+	env GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -buildmode=plugin -o plugins/slack.so plugins/slack/main.go
 
 key:
 	@rm -rf testdata/server.*

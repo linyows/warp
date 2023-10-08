@@ -76,7 +76,6 @@ func (p *Plugins) load() error {
 			continue
 		}
 
-		plug.AfterInit()
 		p.hooks = append(p.hooks, plug)
 	}
 

@@ -49,10 +49,10 @@ func TestHookFileConst(t *testing.T) {
 	}
 }
 
-func TestHookFilePrefix(t *testing.T) {
+func TestHookFileName(t *testing.T) {
 	f := &HookFile{}
 	expect := "file"
-	got := f.prefix()
+	got := f.Name()
 	if got != expect {
 		t.Errorf("expected %s, got %s", expect, got)
 	}

@@ -15,7 +15,7 @@ type HookMysql struct {
 	pool *sql.DB // Database connection pool.
 }
 
-func (h *HookMysql) prefix() string {
+func (h *HookMysql) Name() string {
 	return "mysql"
 }
 
@@ -44,7 +44,7 @@ func (h *HookMysql) AfterInit() {
 func (h *HookMysql) AfterComm(d *AfterCommData) {
 	conn, err := h.conn()
 	if err != nil {
-		fmt.Printf("[%s] %s\n", h.prefix(), err)
+		fmt.Printf("[%s] %s\n", h.Name(), err)
 		return
 	}
 
@@ -57,14 +57,14 @@ func (h *HookMysql) AfterComm(d *AfterCommData) {
 		d.Data,
 	)
 	if err != nil {
-		fmt.Printf("[%s] db exec error: %s\n", h.prefix(), err)
+		fmt.Printf("[%s] db exec error: %s\n", h.Name(), err)
 	}
 }
 
 func (h *HookMysql) AfterConn(d *AfterConnData) {
 	conn, err := h.conn()
 	if err != nil {
-		fmt.Printf("[%s] %s\n", h.prefix(), err)
+		fmt.Printf("[%s] %s\n", h.Name(), err)
 		return
 	}
 
@@ -77,6 +77,6 @@ func (h *HookMysql) AfterConn(d *AfterConnData) {
 		d.Elapse,
 	)
 	if err != nil {
-		fmt.Printf("[%s] db exec error: %s\n", h.prefix(), err)
+		fmt.Printf("[%s] db exec error: %s\n", h.Name(), err)
 	}
 }
