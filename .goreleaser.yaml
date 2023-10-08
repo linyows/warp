@@ -2,52 +2,22 @@
 # Make sure to check the documentation at https://goreleaser.com
 before:
   hooks:
-    # You may remove this if you don't use go modules.
     - go mod tidy
-    # you may remove this if you don't need go generate
     - go generate ./...
 builds:
   - env:
-      - CGO_ENABLED=1
+      - CGO_ENABLED=0
     id: warp
     main: ./cmd/warp
-    goos: [linux]
-    goarch: [amd64]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
     ldflags:
       - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{ .CommitDate }} -X main.builtBy=goreleaser
-  - env:
-      - CGO_ENABLED=1
-    id: mysql
-    main: ./plugins/mysql/...
-    buildmode: plugin
-    no_main_check: true
-    binary: warp-plugin-mysql.so
-    goos: [linux]
-    goarch: [amd64]
-  - env:
-      - CGO_ENABLED=1
-    id: sqlite
-    main: ./plugins/sqlite/...
-    buildmode: plugin
-    no_main_check: true
-    binary: warp-plugin-sqlite.so
-    goos: [linux]
-    goarch: [amd64]
-  - env:
-      - CGO_ENABLED=1
-    id: file
-    main: ./plugins/file/...
-    buildmode: plugin
-    no_main_check: true
-    binary: warp-plugin-file.so
-    goos: [linux]
-    goarch: [amd64]
 
 archives:
   - id: warp
     builds: [warp]
     format: tar.gz
-    # this name template makes the OS and Arch compatible with the results of uname.
     name_template: >-
       {{ .ProjectName }}_
       {{- .Os }}_
@@ -55,52 +25,6 @@ archives:
       {{- else if eq .Arch "386" }}i386
       {{- else }}{{ .Arch }}{{ end }}
       {{- if .Arm }}v{{ .Arm }}{{ end }}
-    # use zip for windows archives
-    format_overrides:
-    - goos: windows
-      format: zip
-  - id: warp-mysql-plugin
-    builds: [mysql]
-    format: tar.gz
-    # this name template makes the OS and Arch compatible with the results of uname.
-    name_template: >-
-      {{ .ProjectName }}_mysql_plugin_
-      {{- .Os }}_
-      {{- if eq .Arch "amd64" }}x86_64
-      {{- else if eq .Arch "386" }}i386
-      {{- else }}{{ .Arch }}{{ end }}
-      {{- if .Arm }}v{{ .Arm }}{{ end }}
-    # use zip for windows archives
-    format_overrides:
-    - goos: windows
-      format: zip
-  - id: warp-sqlite-plugin
-    builds: [sqlite]
-    format: tar.gz
-    # this name template makes the OS and Arch compatible with the results of uname.
-    name_template: >-
-      {{ .ProjectName }}_sqlite_plugin_
-      {{- .Os }}_
-      {{- if eq .Arch "amd64" }}x86_64
-      {{- else if eq .Arch "386" }}i386
-      {{- else }}{{ .Arch }}{{ end }}
-      {{- if .Arm }}v{{ .Arm }}{{ end }}
-    # use zip for windows archives
-    format_overrides:
-    - goos: windows
-      format: zip
-  - id: warp-file-plugin
-    builds: [file]
-    format: tar.gz
-    # this name template makes the OS and Arch compatible with the results of uname.
-    name_template: >-
-      {{ .ProjectName }}_file_plugin_
-      {{- .Os }}_
-      {{- if eq .Arch "amd64" }}x86_64
-      {{- else if eq .Arch "386" }}i386
-      {{- else }}{{ .Arch }}{{ end }}
-      {{- if .Arm }}v{{ .Arm }}{{ end }}
-    # use zip for windows archives
     format_overrides:
     - goos: windows
       format: zip

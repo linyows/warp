@@ -34,7 +34,7 @@ func (s *Server) Start() error {
 	if err := pl.load(); err != nil {
 		return err
 	}
-	s.Hooks = pl.hooks
+	s.Hooks = append(s.Hooks, pl.hooks...)
 
 	addr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:%d", s.Addr, s.Port))
 	if err != nil {
