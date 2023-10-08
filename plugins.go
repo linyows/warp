@@ -8,34 +8,12 @@ import (
 	"path"
 	"path/filepath"
 	"plugin"
-	"time"
 )
 
 const (
 	pluginVarName string = "Hook"
 	TimeFormat    string = "2006-01-02T15:04:05.999999"
 )
-
-type Hook interface {
-	AfterInit()
-	AfterComm(*AfterCommData)
-	AfterConn(*AfterConnData)
-}
-
-type AfterCommData struct {
-	ConnID     string
-	OccurredAt time.Time
-	Data
-	Direction
-}
-
-type AfterConnData struct {
-	ConnID     string
-	OccurredAt time.Time
-	MailFrom   []byte
-	MailTo     []byte
-	Elapse
-}
 
 type Plugins struct {
 	path  string
