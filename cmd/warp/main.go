@@ -16,6 +16,7 @@ var (
 	ip      = flag.String("ip", "127.0.0.1", "listen ip")
 	port    = flag.Int("port", 0, "listen port")
 	oip     = flag.String("outbound-ip", "0.0.0.0", "outbound ip")
+	storage = flag.String("storage", "", "sspecify extended storage from: mysql, sqlite, file")
 	verFlag = flag.Bool("version", false, "show build version")
 )
 
@@ -33,6 +34,15 @@ func main() {
 		Addr:         *ip,
 		Port:         *port,
 		OutboundAddr: *oip,
+	}
+
+	switch *storage {
+	case "mysql":
+		w.Hooks = []warp.Hook{&warp.HookMysql{}}
+	case "sqlite":
+		w.Hooks = []warp.Hook{&warp.HookSqlite{}}
+	case "file":
+		w.Hooks = []warp.Hook{&warp.HookFile{}}
 	}
 
 	err := w.Start()
