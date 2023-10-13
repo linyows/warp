@@ -34,7 +34,7 @@ func (h *HookMysql) conn() (*sql.DB, error) {
 	var err error
 	h.pool, err = sql.Open("mysql", dsn)
 	if err != nil {
-		return nil, fmt.Errorf("sql.Open error: s%s\n", err)
+		return nil, fmt.Errorf("sql.Open error: %s\n", err)
 	}
 
 	return h.pool, nil
