@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 const (
@@ -48,7 +48,7 @@ func (h *HookSqlite) conn() (*sql.DB, error) {
 	}
 
 	var err error
-	h.pool, err = sql.Open("sqlite3", dsn)
+	h.pool, err = sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("sql.Open error: %s(%#v)\n", err.Error(), err)
 	}
