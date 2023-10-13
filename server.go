@@ -16,6 +16,7 @@ type Server struct {
 	Port         int
 	Hooks        []Hook
 	OutboundAddr string
+	Verbose      bool
 	log          *log.Logger
 }
 
@@ -69,7 +70,9 @@ func (s *Server) Start() error {
 
 func (s *Server) HandleConnection(conn net.Conn) {
 	uuid := GenID().String()
-	s.log.Printf("%s %s connected from %s", uuid, onPxy, conn.RemoteAddr())
+	if s.Verbose {
+		s.log.Printf("%s %s connected from %s", uuid, onPxy, conn.RemoteAddr())
+	}
 
 	raddr, err := s.OriginalAddrDst(conn)
 	if err != nil {
@@ -80,7 +83,9 @@ func (s *Server) HandleConnection(conn net.Conn) {
 	go func() {
 		now := time.Now()
 		b := []byte(fmt.Sprintf("connecting to %s", raddr))
-		s.log.Printf("%s %s %s", uuid, onPxy, b)
+		if s.Verbose {
+			s.log.Printf("%s %s %s", uuid, onPxy, b)
+		}
 		for _, hook := range s.Hooks {
 			hook.AfterComm(&AfterCommData{
 				ConnID:     uuid,
@@ -111,7 +116,9 @@ func (s *Server) HandleConnection(conn net.Conn) {
 	}
 	p.afterCommHook = func(b Data, to Direction) {
 		now := time.Now()
-		s.log.Printf("%s %s %s", p.id, to, p.escapeCRLF(b))
+		if s.Verbose {
+			s.log.Printf("%s %s %s", p.id, to, p.escapeCRLF(b))
+		}
 		for _, hook := range s.Hooks {
 			hook.AfterComm(&AfterCommData{
 				ConnID:     p.id,
@@ -125,7 +132,9 @@ func (s *Server) HandleConnection(conn net.Conn) {
 		now := time.Now()
 		elapse := p.elapse()
 		b := fmt.Sprintf("from:%s to:%s elapse:%s", p.sMailAddr, p.rMailAddr, elapse)
-		s.log.Printf("%s %s %s", p.id, onPxy, b)
+		if s.Verbose {
+			s.log.Printf("%s %s %s", p.id, onPxy, b)
+		}
 		for _, hook := range s.Hooks {
 			hook.AfterConn(&AfterConnData{
 				ConnID:     p.id,
