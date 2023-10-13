@@ -4,6 +4,7 @@ TEST_OPTIONS?=
 
 GOOS?=linux
 GOARCH?=amd64
+CGO_ENABLED?=0
 
 default: build
 
@@ -11,7 +12,7 @@ setup:
 	go mod download
 
 build:
-	env GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -o warp ./cmd/warp/main.go
+	env GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=$(CGO_ENABLED) go build -o warp ./cmd/warp/main.go
 
 run:
 	env GOOS=$(GOOS) GOARCH=$(GOARCH) go run ./cmd/warp/main.go
