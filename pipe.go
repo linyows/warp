@@ -3,6 +3,7 @@ package warp
 import (
 	"bytes"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -113,6 +114,7 @@ func (p *Pipe) mediateOnDownstream(b []byte, i int) ([]byte, int, bool) {
 	if p.isResponseOfEHLOWithStartTLS(b) {
 		go p.afterCommHook(data, dstToPxy)
 		b, i = p.removeStartTLSCommand(b, i)
+		data = b[0:i]
 	} else if p.isResponseOfReadyToStartTLS(b) {
 		go p.afterCommHook(data, dstToPxy)
 		er := p.connectTLS()
@@ -158,8 +160,8 @@ func (p *Pipe) Do() {
 	// Sender --- packet --> Proxy
 	go func() {
 		_, err := p.copy(upstream, p.mediateOnUpstream)
-		if err != nil {
-			go p.afterCommHook([]byte(fmt.Sprintf("io copy error: %s", err.Error())), pxyToDst)
+		if err != nil && !errors.Is(err, net.ErrClosed) {
+			go p.afterCommHook([]byte(fmt.Sprintf("io copy error: %s", err)), pxyToDst)
 		}
 		once.Do(p.close())
 	}()
@@ -167,8 +169,8 @@ func (p *Pipe) Do() {
 	// Proxy <--- packet -- Receiver
 	go func() {
 		_, err := p.copy(downstream, p.mediateOnDownstream)
-		if err != nil {
-			go p.afterCommHook([]byte(fmt.Sprintf("io copy error: %s", err.Error())), dstToPxy)
+		if err != nil && !errors.Is(err, net.ErrClosed) {
+			go p.afterCommHook([]byte(fmt.Sprintf("io copy error: %s", err)), dstToPxy)
 		}
 		once.Do(p.close())
 	}()

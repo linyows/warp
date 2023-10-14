@@ -42,24 +42,38 @@ type SMTPClient struct {
 }
 
 func (c *SMTPClient) SendEmail() error {
+	from := "alice@example.test"
+	to := "bob@example.local"
+
 	s, err := smtp.Dial(fmt.Sprintf("%s:%d", c.IP, c.Port))
 	if err != nil {
 		return fmt.Errorf("smtp.Dial(%s:%d): %#v", c.IP, c.Port, err)
 	}
-	if err := s.Mail("alice@example.test"); err != nil {
+	if ok, _ := s.Extension("STARTTLS"); ok {
+		return fmt.Errorf("STARTTLS is available: %#v", s)
+	}
+	if err := s.Mail(from); err != nil {
 		return fmt.Errorf("smtp mail error: %#v", err)
 	}
-	if err := s.Rcpt("bob@example.local"); err != nil {
+	if err := s.Rcpt(to); err != nil {
 		return fmt.Errorf("smtp rcpt error: %#v", err)
 	}
 	wc, err := s.Data()
 	if err != nil {
 		return fmt.Errorf("smtp data error: %#v", err)
 	}
-	_, err = fmt.Fprintf(wc, "This is the email body")
+
+	prefix := []byte(fmt.Sprintf("To: %s\nFrom: %s\nSubject: Test\n\n", to, from))
+	data := make([]byte, 1024)
+	for i := 0; i < len(data); i += 4 {
+		copy(data[i:i+4], []byte("Test"))
+	}
+	data = append(prefix, data...)
+	_, err = wc.Write(data)
 	if err != nil {
 		return fmt.Errorf("smtp data print error: %#v", err)
 	}
+
 	if err = wc.Close(); err != nil {
 		return fmt.Errorf("smtp close print error: %#v", err)
 	}
