@@ -114,6 +114,7 @@ func (p *Pipe) mediateOnDownstream(b []byte, i int) ([]byte, int, bool) {
 	if p.isResponseOfEHLOWithStartTLS(b) {
 		go p.afterCommHook(data, dstToPxy)
 		b, i = p.removeStartTLSCommand(b, i)
+		data = b[0:i]
 	} else if p.isResponseOfReadyToStartTLS(b) {
 		go p.afterCommHook(data, dstToPxy)
 		er := p.connectTLS()
