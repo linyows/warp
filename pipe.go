@@ -14,9 +14,10 @@ import (
 )
 
 type Pipe struct {
-	id    string
-	sConn net.Conn
-	rConn net.Conn
+	id         string
+	sConn      net.Conn
+	rConn      net.Conn
+	bufferSize int
 
 	rAddr       *net.TCPAddr
 	sMailAddr   []byte
@@ -46,7 +47,6 @@ const (
 	mailFromPrefix string = "MAIL FROM:<"
 	rcptToPrefix   string = "RCPT TO:<"
 	mailRegex      string = `[A-z0-9.!#$%&'*+\-/=?^_\{|}~]{1,64}@[A-z0-9.\-]{1,255}`
-	bufferSize     int    = 32 * 1024
 	crlf           string = "\r\n"
 	mailHeaderEnd  string = crlf + crlf
 
@@ -213,7 +213,7 @@ func (p *Pipe) dst(d Flow) net.Conn {
 }
 
 func (p *Pipe) copy(dr Flow, fn Mediator) (written int64, err error) {
-	size := bufferSize
+	size := p.bufferSize
 	src, ok := p.src(dr).(io.Reader)
 	if !ok {
 		err = fmt.Errorf("io.Reader cast error")
@@ -226,7 +226,7 @@ func (p *Pipe) copy(dr Flow, fn Mediator) (written int64, err error) {
 		}
 		go p.afterCommHook([]byte(fmt.Sprintf("io.Reader size: %d", size)), onPxy)
 	}
-	buf := make([]byte, bufferSize)
+	buf := make([]byte, p.bufferSize)
 
 	for {
 		var isContinue bool
@@ -284,7 +284,7 @@ func (p *Pipe) starttls() error {
 }
 
 func (p *Pipe) readReceiverConn() error {
-	buf := make([]byte, bufferSize)
+	buf := make([]byte, 64*1024)
 	i, err := p.rConn.Read(buf)
 	if err != nil {
 		return err

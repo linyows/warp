@@ -17,6 +17,7 @@ var (
 	port    = flag.Int("port", 0, "listen port")
 	oip     = flag.String("outbound-ip", "0.0.0.0", "outbound ip")
 	storage = flag.String("storage", "", "sspecify extended storage from: mysql, sqlite, file")
+	maxSize = flag.Int("message-size-limit", 10240000, "The maximal size in bytes of a message")
 	verbose = flag.Bool("verbose", false, "verbose logging")
 	verFlag = flag.Bool("version", false, "show build version")
 )
@@ -32,10 +33,11 @@ func main() {
 	}
 
 	w := &warp.Server{
-		Addr:         *ip,
-		Port:         *port,
-		OutboundAddr: *oip,
-		Verbose:      *verbose,
+		Addr:             *ip,
+		Port:             *port,
+		OutboundAddr:     *oip,
+		Verbose:          *verbose,
+		MessageSizeLimit: *maxSize,
 	}
 
 	switch *storage {
