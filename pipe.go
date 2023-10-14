@@ -30,6 +30,8 @@ type Pipe struct {
 	locked   bool
 	blocker  chan interface{}
 
+	isWaitedStarttlsRes bool
+
 	timeAtConnected    time.Time
 	timeAtDataStarting time.Time
 
@@ -91,6 +93,7 @@ func (p *Pipe) mediateOnUpstream(b []byte, i int) ([]byte, int, bool) {
 	if !p.tls && p.readytls {
 		p.locked = true
 		er := p.starttls()
+		p.isWaitedStarttlsRes = true
 		if er != nil {
 			go p.afterCommHook([]byte(fmt.Sprintf("starttls error: %s", er.Error())), pxyToDst)
 		}
@@ -123,14 +126,14 @@ func (p *Pipe) mediateOnDownstream(b []byte, i int) ([]byte, int, bool) {
 		}
 	}
 
-	// time before email input
-	p.setTimeAtDataStarting(b)
-
-	// remove buffering ready response
-	if p.tls && !p.readytls && p.locked {
-		// continue
+	// remove buffering "220 2.0.0 Ready to start TLS" response
+	if p.isWaitedStarttlsRes {
+		p.isWaitedStarttlsRes = false
 		return b, i, true
 	}
+
+	// time before email input
+	p.setTimeAtDataStarting(b)
 
 	if p.isResponseOfEHLOWithoutStartTLS(b) {
 		go p.afterCommHook(data, pxyToSrc)
