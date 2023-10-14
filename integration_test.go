@@ -26,9 +26,10 @@ func TestIntegration(t *testing.T) {
 		specifiedDstIP = ip
 		specifiedDstPort = smtpPort
 		w := &Server{
-			Addr: ip,
-			Port: warpPort,
-			log:  log.New(&warpLog, "", log.Ldate|log.Ltime|log.Lmicroseconds),
+			Addr:    ip,
+			Port:    warpPort,
+			Verbose: true,
+			log:     log.New(&warpLog, "", log.Ldate|log.Ltime|log.Lmicroseconds),
 		}
 		if err := w.Start(); err != nil {
 			t.Errorf("warp raised error: %s", err)
