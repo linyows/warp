@@ -46,6 +46,9 @@ func (c *SMTPClient) SendEmail() error {
 	if err != nil {
 		return fmt.Errorf("smtp.Dial(%s:%d): %#v", c.IP, c.Port, err)
 	}
+	if ok, _ := s.Extension("STARTTLS"); ok {
+		return fmt.Errorf("STARTTLS is available: %#v", s)
+	}
 	if err := s.Mail("alice@example.test"); err != nil {
 		return fmt.Errorf("smtp mail error: %#v", err)
 	}
