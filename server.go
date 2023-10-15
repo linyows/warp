@@ -12,12 +12,13 @@ import (
 const SO_ORIGINAL_DST = 80
 
 type Server struct {
-	Addr         string
-	Port         int
-	Hooks        []Hook
-	OutboundAddr string
-	Verbose      bool
-	log          *log.Logger
+	Addr             string
+	Port             int
+	Hooks            []Hook
+	OutboundAddr     string
+	Verbose          bool
+	log              *log.Logger
+	MessageSizeLimit int
 }
 
 // These are global variables for integration test.
@@ -29,6 +30,10 @@ var (
 func (s *Server) Start() error {
 	if s.log == nil {
 		s.log = log.New(os.Stderr, "", log.Ldate|log.Ltime|log.Lmicroseconds)
+	}
+	if s.MessageSizeLimit == 0 {
+		// default is around 10MB (https://www.postfix.org/postconf.5.html)
+		s.MessageSizeLimit = 10240000
 	}
 
 	pl := &Plugins{}
@@ -109,10 +114,11 @@ func (s *Server) HandleConnection(conn net.Conn) {
 	}
 
 	p := &Pipe{
-		id:    uuid,
-		sConn: conn,
-		rConn: dstConn,
-		rAddr: raddr,
+		id:         uuid,
+		sConn:      conn,
+		rConn:      dstConn,
+		rAddr:      raddr,
+		bufferSize: s.MessageSizeLimit,
 	}
 	p.afterCommHook = func(b Data, to Direction) {
 		now := time.Now()

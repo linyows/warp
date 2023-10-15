@@ -14,9 +14,10 @@ import (
 )
 
 type Pipe struct {
-	id    string
-	sConn net.Conn
-	rConn net.Conn
+	id         string
+	sConn      net.Conn
+	rConn      net.Conn
+	bufferSize int
 
 	rAddr       *net.TCPAddr
 	sMailAddr   []byte
@@ -28,6 +29,8 @@ type Pipe struct {
 	readytls bool
 	locked   bool
 	blocker  chan interface{}
+
+	isWaitedStarttlsRes bool
 
 	timeAtConnected    time.Time
 	timeAtDataStarting time.Time
@@ -46,7 +49,6 @@ const (
 	mailFromPrefix string = "MAIL FROM:<"
 	rcptToPrefix   string = "RCPT TO:<"
 	mailRegex      string = `[A-z0-9.!#$%&'*+\-/=?^_\{|}~]{1,64}@[A-z0-9.\-]{1,255}`
-	bufferSize     int    = 32 * 1024
 	crlf           string = "\r\n"
 	mailHeaderEnd  string = crlf + crlf
 
@@ -91,6 +93,7 @@ func (p *Pipe) mediateOnUpstream(b []byte, i int) ([]byte, int, bool) {
 	if !p.tls && p.readytls {
 		p.locked = true
 		er := p.starttls()
+		p.isWaitedStarttlsRes = true
 		if er != nil {
 			go p.afterCommHook([]byte(fmt.Sprintf("starttls error: %s", er.Error())), pxyToDst)
 		}
@@ -123,14 +126,14 @@ func (p *Pipe) mediateOnDownstream(b []byte, i int) ([]byte, int, bool) {
 		}
 	}
 
-	// time before email input
-	p.setTimeAtDataStarting(b)
-
-	// remove buffering ready response
-	if p.tls && !p.readytls && p.locked {
-		// continue
+	// remove buffering "220 2.0.0 Ready to start TLS" response
+	if p.isWaitedStarttlsRes {
+		p.isWaitedStarttlsRes = false
 		return b, i, true
 	}
+
+	// time before email input
+	p.setTimeAtDataStarting(b)
 
 	if p.isResponseOfEHLOWithoutStartTLS(b) {
 		go p.afterCommHook(data, pxyToSrc)
@@ -213,7 +216,7 @@ func (p *Pipe) dst(d Flow) net.Conn {
 }
 
 func (p *Pipe) copy(dr Flow, fn Mediator) (written int64, err error) {
-	size := bufferSize
+	size := p.bufferSize
 	src, ok := p.src(dr).(io.Reader)
 	if !ok {
 		err = fmt.Errorf("io.Reader cast error")
@@ -226,7 +229,7 @@ func (p *Pipe) copy(dr Flow, fn Mediator) (written int64, err error) {
 		}
 		go p.afterCommHook([]byte(fmt.Sprintf("io.Reader size: %d", size)), onPxy)
 	}
-	buf := make([]byte, bufferSize)
+	buf := make([]byte, p.bufferSize)
 
 	for {
 		var isContinue bool
@@ -284,7 +287,7 @@ func (p *Pipe) starttls() error {
 }
 
 func (p *Pipe) readReceiverConn() error {
-	buf := make([]byte, bufferSize)
+	buf := make([]byte, 64*1024)
 	i, err := p.rConn.Read(buf)
 	if err != nil {
 		return err
