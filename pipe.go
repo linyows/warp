@@ -9,7 +9,6 @@ import (
 	"net"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -157,8 +156,8 @@ func (p *Pipe) Do() {
 	p.timeAtConnected = time.Now()
 	go p.afterCommHook([]byte(fmt.Sprintf("connected to %s", p.rAddr)), onPxy)
 
-	var once sync.Once
 	p.blocker = make(chan interface{})
+	done := make(chan bool)
 
 	// Sender --- packet --> Proxy
 	go func() {
@@ -166,7 +165,9 @@ func (p *Pipe) Do() {
 		if err != nil && !errors.Is(err, net.ErrClosed) {
 			go p.afterCommHook([]byte(fmt.Sprintf("io copy error: %s", err)), pxyToDst)
 		}
-		once.Do(p.close())
+		select {
+		case done <- true:
+		}
 	}()
 
 	// Proxy <--- packet -- Receiver
@@ -175,8 +176,12 @@ func (p *Pipe) Do() {
 		if err != nil && !errors.Is(err, net.ErrClosed) {
 			go p.afterCommHook([]byte(fmt.Sprintf("io copy error: %s", err)), dstToPxy)
 		}
-		once.Do(p.close())
+		select {
+		case done <- true:
+		}
 	}()
+
+	<-done
 }
 
 func (p *Pipe) setSenderServerName(b []byte) {
@@ -329,13 +334,11 @@ func (p *Pipe) escapeCRLF(b []byte) []byte {
 	return bytes.ReplaceAll(b, []byte(crlf), []byte("\\r\\n"))
 }
 
-func (p *Pipe) close() func() {
-	return func() {
-		defer p.afterConnHook()
-		defer p.afterCommHook([]byte("connections closed"), onPxy)
-		p.rConn.Close()
-		p.sConn.Close()
-	}
+func (p *Pipe) Close() {
+	p.rConn.Close()
+	p.sConn.Close()
+	go p.afterCommHook([]byte("connections closed"), onPxy)
+	go p.afterConnHook()
 }
 
 func (p *Pipe) isResponseOfEHLOWithStartTLS(b []byte) bool {
