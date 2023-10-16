@@ -135,23 +135,34 @@ func (s *Server) HandleConnection(conn net.Conn) {
 		}
 	}
 	p.afterConnHook = func() {
+		sM := p.sMailAddr
+		rM := p.rMailAddr
+		if len(sM) == 0 {
+			sM = []byte("unknown")
+		}
+		if len(rM) == 0 {
+			rM = []byte("unknown")
+		}
+
 		now := time.Now()
 		elapse := p.elapse()
-		b := fmt.Sprintf("from:%s to:%s elapse:%s", p.sMailAddr, p.rMailAddr, elapse)
 		if s.Verbose {
+			b := fmt.Sprintf("from:%s to:%s elapse:%s", sM, rM, elapse)
 			s.log.Printf("%s %s %s", p.id, onPxy, b)
 		}
 		for _, hook := range s.Hooks {
 			hook.AfterConn(&AfterConnData{
 				ConnID:     p.id,
 				OccurredAt: now,
-				MailFrom:   p.sMailAddr,
-				MailTo:     p.rMailAddr,
+				MailFrom:   sM,
+				MailTo:     rM,
 				Elapse:     elapse,
 			})
 		}
 	}
+
 	p.Do()
+	p.Close()
 }
 
 func (s *Server) OriginalAddrDst(conn net.Conn) (*net.TCPAddr, error) {

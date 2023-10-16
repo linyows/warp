@@ -9,7 +9,6 @@ import (
 	"net"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -31,6 +30,7 @@ type Pipe struct {
 	blocker  chan interface{}
 
 	isWaitedStarttlsRes bool
+	isHeaderRemoved     bool
 
 	timeAtConnected    time.Time
 	timeAtDataStarting time.Time
@@ -75,9 +75,6 @@ var (
 )
 
 func (e Elapse) String() string {
-	if e < 0 {
-		return "nil"
-	}
 	return fmt.Sprintf("%d msec", e)
 }
 
@@ -105,7 +102,9 @@ func (p *Pipe) mediateOnUpstream(b []byte, i int) ([]byte, int, bool) {
 		p.waitForTLSConn(b, i)
 		go p.afterCommHook(data, pxyToDst)
 	} else {
-		go p.afterCommHook(p.removeMailBody(data), srcToDst)
+		if !p.isHeaderRemoved {
+			go p.afterCommHook(p.removeMailBody(data), srcToDst)
+		}
 	}
 
 	return b, i, false
@@ -157,8 +156,8 @@ func (p *Pipe) Do() {
 	p.timeAtConnected = time.Now()
 	go p.afterCommHook([]byte(fmt.Sprintf("connected to %s", p.rAddr)), onPxy)
 
-	var once sync.Once
 	p.blocker = make(chan interface{})
+	done := make(chan bool)
 
 	// Sender --- packet --> Proxy
 	go func() {
@@ -166,7 +165,7 @@ func (p *Pipe) Do() {
 		if err != nil && !errors.Is(err, net.ErrClosed) {
 			go p.afterCommHook([]byte(fmt.Sprintf("io copy error: %s", err)), pxyToDst)
 		}
-		once.Do(p.close())
+		done <- true
 	}()
 
 	// Proxy <--- packet -- Receiver
@@ -175,8 +174,10 @@ func (p *Pipe) Do() {
 		if err != nil && !errors.Is(err, net.ErrClosed) {
 			go p.afterCommHook([]byte(fmt.Sprintf("io copy error: %s", err)), dstToPxy)
 		}
-		once.Do(p.close())
+		done <- true
 	}()
+
+	<-done
 }
 
 func (p *Pipe) setSenderServerName(b []byte) {
@@ -329,13 +330,11 @@ func (p *Pipe) escapeCRLF(b []byte) []byte {
 	return bytes.ReplaceAll(b, []byte(crlf), []byte("\\r\\n"))
 }
 
-func (p *Pipe) close() func() {
-	return func() {
-		defer p.afterConnHook()
-		defer p.afterCommHook([]byte("connections closed"), onPxy)
-		p.rConn.Close()
-		p.sConn.Close()
-	}
+func (p *Pipe) Close() {
+	p.rConn.Close()
+	p.sConn.Close()
+	go p.afterCommHook([]byte("connections closed"), onPxy)
+	go p.afterConnHook()
 }
 
 func (p *Pipe) isResponseOfEHLOWithStartTLS(b []byte) bool {
@@ -355,6 +354,7 @@ func (p *Pipe) removeMailBody(b Data) Data {
 	if i == -1 {
 		return b
 	}
+	p.isHeaderRemoved = true
 	return b[:i]
 }
 

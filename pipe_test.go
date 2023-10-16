@@ -172,10 +172,6 @@ func TestElapseString(t *testing.T) {
 			elapse: 2147483647,
 			expect: "2147483647 msec",
 		},
-		{
-			elapse: -1,
-			expect: "nil",
-		},
 	}
 
 	for _, v := range tests {

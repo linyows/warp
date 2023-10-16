@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"testing"
+	"time"
 )
 
 func TestIntegration(t *testing.T) {
@@ -53,6 +54,7 @@ func TestIntegration(t *testing.T) {
 
 	c := &SMTPClient{IP: ip, Port: warpPort}
 	err := c.SendEmail()
+	time.Sleep(1 * time.Second)
 
 	fmt.Printf("\nWarp Server:\n%s", &warpLog)
 	fmt.Printf("\nSMTP Server:\n%s\n", &smtpLog)
