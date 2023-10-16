@@ -165,9 +165,7 @@ func (p *Pipe) Do() {
 		if err != nil && !errors.Is(err, net.ErrClosed) {
 			go p.afterCommHook([]byte(fmt.Sprintf("io copy error: %s", err)), pxyToDst)
 		}
-		select {
-		case done <- true:
-		}
+		done <- true
 	}()
 
 	// Proxy <--- packet -- Receiver
@@ -176,9 +174,7 @@ func (p *Pipe) Do() {
 		if err != nil && !errors.Is(err, net.ErrClosed) {
 			go p.afterCommHook([]byte(fmt.Sprintf("io copy error: %s", err)), dstToPxy)
 		}
-		select {
-		case done <- true:
-		}
+		done <- true
 	}()
 
 	<-done
