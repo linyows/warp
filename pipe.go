@@ -75,9 +75,6 @@ var (
 )
 
 func (e Elapse) String() string {
-	if e < 0 {
-		return "nil"
-	}
 	return fmt.Sprintf("%d msec", e)
 }
 
