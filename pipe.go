@@ -30,6 +30,7 @@ type Pipe struct {
 	blocker  chan interface{}
 
 	isWaitedStarttlsRes bool
+	isHeaderRemoved     bool
 
 	timeAtConnected    time.Time
 	timeAtDataStarting time.Time
@@ -104,7 +105,9 @@ func (p *Pipe) mediateOnUpstream(b []byte, i int) ([]byte, int, bool) {
 		p.waitForTLSConn(b, i)
 		go p.afterCommHook(data, pxyToDst)
 	} else {
-		go p.afterCommHook(p.removeMailBody(data), srcToDst)
+		if !p.isHeaderRemoved {
+			go p.afterCommHook(p.removeMailBody(data), srcToDst)
+		}
 	}
 
 	return b, i, false
@@ -358,6 +361,7 @@ func (p *Pipe) removeMailBody(b Data) Data {
 	if i == -1 {
 		return b
 	}
+	p.isHeaderRemoved = true
 	return b[:i]
 }
 
