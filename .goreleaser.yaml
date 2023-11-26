@@ -13,14 +13,14 @@ builds:
     goarch: [amd64, arm64]
     ldflags:
       - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{ .CommitDate }} -X main.builtBy=goreleaser
-  - env:
-      - CGO_ENABLED=1
-    id: warp-cgo
-    main: ./cmd/warp
-    goos: [linux]
-    goarch: [amd64]
-    ldflags:
-      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{ .CommitDate }} -X main.builtBy=goreleaser
+        #  - env:
+        #      - CGO_ENABLED=1
+        #    id: warp-cgo
+        #    main: ./cmd/warp
+        #    goos: [linux]
+        #    goarch: [amd64]
+        #    ldflags:
+        #      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{ .CommitDate }} -X main.builtBy=goreleaser
 
 archives:
   - id: warp
@@ -36,19 +36,19 @@ archives:
     format_overrides:
     - goos: windows
       format: zip
-  - id: warp-cgo
-    builds: [warp-cgo]
-    format: tar.gz
-    name_template: >-
-      {{ .ProjectName }}_cgo_
-      {{- .Os }}_
-      {{- if eq .Arch "amd64" }}x86_64
-      {{- else if eq .Arch "386" }}i386
-      {{- else }}{{ .Arch }}{{ end }}
-      {{- if .Arm }}v{{ .Arm }}{{ end }}
-    format_overrides:
-    - goos: windows
-      format: zip
+      #  - id: warp-cgo
+      #    builds: [warp-cgo]
+      #    format: tar.gz
+      #    name_template: >-
+      #      {{ .ProjectName }}_cgo_
+      #      {{- .Os }}_
+      #      {{- if eq .Arch "amd64" }}x86_64
+      #      {{- else if eq .Arch "386" }}i386
+      #      {{- else }}{{ .Arch }}{{ end }}
+      #      {{- if .Arm }}v{{ .Arm }}{{ end }}
+      #    format_overrides:
+      #    - goos: windows
+      #      format: zip
 checksum:
   name_template: 'checksums.txt'
 snapshot:

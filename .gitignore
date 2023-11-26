@@ -1,5 +1,4 @@
 warp
-plugin/*.so
+plugins/*.so
 dist/
 testdata/server.*
-testdata/warp.sqlite

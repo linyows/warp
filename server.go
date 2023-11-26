@@ -15,6 +15,7 @@ type Server struct {
 	Addr             string
 	Port             int
 	Hooks            []Hook
+	Plugins          []string
 	OutboundAddr     string
 	Verbose          bool
 	log              *log.Logger
@@ -36,7 +37,9 @@ func (s *Server) Start() error {
 		s.MessageSizeLimit = 10240000
 	}
 
-	pl := &Plugins{}
+	pl := &Plugins{
+		list: s.Plugins,
+	}
 	if err := pl.load(); err != nil {
 		return err
 	}

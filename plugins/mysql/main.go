@@ -1,4 +1,4 @@
-package warp
+package main
 
 import (
 	"database/sql"
@@ -6,6 +6,7 @@ import (
 	"os"
 
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/linyows/warp"
 )
 
 const (
@@ -13,17 +14,17 @@ const (
 	mysqlConnQuery string = "insert into connections (id, occurred_at, mail_from, mail_to, elapse) values (?, ?, ?, ?, ?)"
 )
 
-type HookMysql struct {
+type Mysql struct {
 	pool *sql.DB // Database connection pool.
 }
 
-func (h *HookMysql) Name() string {
+func (m *Mysql) Name() string {
 	return "mysql"
 }
 
-func (h *HookMysql) conn() (*sql.DB, error) {
-	if h.pool != nil {
-		return h.pool, nil
+func (m *Mysql) conn() (*sql.DB, error) {
+	if m.pool != nil {
+		return m.pool, nil
 	}
 
 	dsn := os.Getenv("DSN")
@@ -32,53 +33,55 @@ func (h *HookMysql) conn() (*sql.DB, error) {
 	}
 
 	var err error
-	h.pool, err = sql.Open("mysql", dsn)
+	m.pool, err = sql.Open("mysql", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("sql.Open error: %s\n", err)
 	}
 
-	return h.pool, nil
+	return m.pool, nil
 }
 
-func (h *HookMysql) AfterInit() {
+func (m *Mysql) AfterInit() {
 }
 
-func (h *HookMysql) AfterComm(d *AfterCommData) {
-	conn, err := h.conn()
+func (m *Mysql) AfterComm(d *warp.AfterCommData) {
+	conn, err := m.conn()
 	if err != nil {
-		fmt.Printf("[%s] %s\n", h.Name(), err)
+		fmt.Printf("[%s] %s\n", m.Name(), err)
 		return
 	}
 
 	_, err = conn.Exec(
 		mysqlCommQuery,
-		GenID().String(),
+		warp.GenID().String(),
 		d.ConnID,
-		d.OccurredAt.Format(TimeFormat),
+		d.OccurredAt.Format(warp.TimeFormat),
 		d.Direction,
 		d.Data,
 	)
 	if err != nil {
-		fmt.Printf("[%s] db exec error: %s\n", h.Name(), err)
+		fmt.Printf("[%s] db exec error: %s\n", m.Name(), err)
 	}
 }
 
-func (h *HookMysql) AfterConn(d *AfterConnData) {
-	conn, err := h.conn()
+func (m *Mysql) AfterConn(d *warp.AfterConnData) {
+	conn, err := m.conn()
 	if err != nil {
-		fmt.Printf("[%s] %s\n", h.Name(), err)
+		fmt.Printf("[%s] %s\n", m.Name(), err)
 		return
 	}
 
 	_, err = conn.Exec(
 		mysqlConnQuery,
 		d.ConnID,
-		d.OccurredAt.Format(TimeFormat),
+		d.OccurredAt.Format(warp.TimeFormat),
 		d.MailFrom,
 		d.MailTo,
 		d.Elapse,
 	)
 	if err != nil {
-		fmt.Printf("[%s] db exec error: %s\n", h.Name(), err)
+		fmt.Printf("[%s] db exec error: %s\n", m.Name(), err)
 	}
 }
+
+var Hook Mysql //nolint

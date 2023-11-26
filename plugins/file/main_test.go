@@ -1,4 +1,4 @@
-package warp
+package main
 
 import (
 	"bytes"
@@ -7,9 +7,11 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/linyows/warp"
 )
 
-func TestHookFileConst(t *testing.T) {
+func TestFileConst(t *testing.T) {
 	var expect string
 	var got string
 
@@ -49,8 +51,8 @@ func TestHookFileConst(t *testing.T) {
 	}
 }
 
-func TestHookFileName(t *testing.T) {
-	f := &HookFile{}
+func TestFileName(t *testing.T) {
+	f := &File{}
 	expect := "file"
 	got := f.Name()
 	if got != expect {
@@ -58,7 +60,7 @@ func TestHookFileName(t *testing.T) {
 	}
 }
 
-func TestHookFileWriter(t *testing.T) {
+func TestFileWriter(t *testing.T) {
 	var tests = []struct {
 		expectFileName string
 		expectError    string
@@ -85,7 +87,7 @@ func TestHookFileWriter(t *testing.T) {
 			defer os.Unsetenv(v.envName)
 		}
 
-		f := &HookFile{}
+		f := &File{}
 		w, err := f.writer()
 
 		if w != nil || v.expectFileName != "" {
@@ -100,13 +102,13 @@ func TestHookFileWriter(t *testing.T) {
 	}
 }
 
-func TestHookFileAfterComm(t *testing.T) {
+func TestFileAfterComm(t *testing.T) {
 	ti := time.Date(2023, time.August, 16, 14, 48, 0, 0, time.UTC)
 	buffer := new(bytes.Buffer)
-	f := &HookFile{
+	f := &File{
 		file: buffer,
 	}
-	data := &AfterCommData{
+	data := &warp.AfterCommData{
 		ConnID:     "abcdefg",
 		OccurredAt: ti,
 		Data:       []byte("hello"),
@@ -121,13 +123,13 @@ func TestHookFileAfterComm(t *testing.T) {
 	}
 }
 
-func TestHookFileAfterConn(t *testing.T) {
+func TestFileAfterConn(t *testing.T) {
 	ti := time.Date(2023, time.August, 16, 14, 48, 0, 0, time.UTC)
 	buffer := new(bytes.Buffer)
-	f := &HookFile{
+	f := &File{
 		file: buffer,
 	}
-	data := &AfterConnData{
+	data := &warp.AfterConnData{
 		ConnID:     "abcdefg",
 		OccurredAt: ti,
 		MailFrom:   []byte("alice@example.local"),
