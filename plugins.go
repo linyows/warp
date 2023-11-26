@@ -17,6 +17,7 @@ const (
 
 type Plugins struct {
 	path  string
+	list  []string
 	hooks []Hook
 }
 
@@ -69,6 +70,11 @@ func (p *Plugins) load() error {
 		if filepath.Ext(n) != ".so" {
 			continue
 		}
+		nWithoutExt := n[:len(n)-len(filepath.Ext(n))]
+		if !p.isAvailable(nWithoutExt) {
+			fmt.Printf("a plugin of %s is not available!\n", nWithoutExt)
+			continue
+		}
 
 		plug, err := p.lookup(n)
 		if err != nil {
@@ -80,4 +86,13 @@ func (p *Plugins) load() error {
 	}
 
 	return nil
+}
+
+func (p *Plugins) isAvailable(name string) bool {
+	for _, plugin := range p.list {
+		if name == plugin {
+			return true
+		}
+	}
+	return false
 }

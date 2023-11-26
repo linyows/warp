@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/linyows/warp"
 )
@@ -16,7 +17,7 @@ var (
 	ip      = flag.String("ip", "127.0.0.1", "listen ip")
 	port    = flag.Int("port", 0, "listen port")
 	oip     = flag.String("outbound-ip", "0.0.0.0", "outbound ip")
-	storage = flag.String("storage", "", "sspecify extended storage from: mysql, sqlite, file")
+	plugins = flag.String("plugins", "", "use plugin names: mysql, sqlite, file, slack")
 	maxSize = flag.Int("message-size-limit", 10240000, "The maximal size in bytes of a message")
 	verbose = flag.Bool("verbose", false, "verbose logging")
 	verFlag = flag.Bool("version", false, "show build version")
@@ -40,13 +41,12 @@ func main() {
 		MessageSizeLimit: *maxSize,
 	}
 
-	switch *storage {
-	case "mysql":
-		w.Hooks = []warp.Hook{&warp.HookMysql{}}
-	case "sqlite":
-		w.Hooks = []warp.Hook{&warp.HookSqlite{}}
-	case "file":
-		w.Hooks = []warp.Hook{&warp.HookFile{}}
+	if "" != *plugins {
+		pp := strings.Split(*plugins, ",")
+		for i := range pp {
+			pp[i] = strings.TrimSpace(pp[i])
+		}
+		w.Plugins = pp
 	}
 
 	err := w.Start()
