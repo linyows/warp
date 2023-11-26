@@ -130,7 +130,7 @@ vagrant@sender:/vagrant$ make plugin && make
 env GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build -buildmode=plugin -o .dist/mysql.so plugin/mysql/main.go
 env GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build -buildmode=plugin -o .dist/file.so plugin/file/main.go
 env GOOS=linux GOARCH=amd64 go build -o warp ./cmd/warp/main.go
-vagrant@sender:/vagrant$ /vagrant/warp -ip 192.168.30.30 -port 10025
+vagrant@sender:/vagrant$ /vagrant/warp -ip 192.168.30.30 -port 10025 -plugins mysql
 ```
 
 Run on vagrant:
