@@ -1,4 +1,4 @@
-package warp
+package main
 
 import (
 	"database/sql/driver"
@@ -8,9 +8,10 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/linyows/warp"
 )
 
-func TestHookMysqlConst(t *testing.T) {
+func TestMysqlConst(t *testing.T) {
 	var expect string
 	var got string
 
@@ -27,8 +28,8 @@ func TestHookMysqlConst(t *testing.T) {
 	}
 }
 
-func TestHookMysqlName(t *testing.T) {
-	mysql := &HookMysql{}
+func TestMysqlName(t *testing.T) {
+	mysql := &Mysql{}
 	var expect string
 	var got string
 
@@ -39,9 +40,9 @@ func TestHookMysqlName(t *testing.T) {
 	}
 }
 
-func TestHookMysqlConn(t *testing.T) {
+func TestMysqlConn(t *testing.T) {
 	expectError := "missing dsn for mysql, please set `DSN`"
-	mysql := &HookMysql{}
+	mysql := &Mysql{}
 	_, err := mysql.conn()
 
 	if err != nil && fmt.Sprintf("%s", err) != expectError {
@@ -56,7 +57,7 @@ func (a AnyID) Match(v driver.Value) bool {
 	return ok
 }
 
-func TestHookMysqlAfterComm(t *testing.T) {
+func TestMysqlAfterComm(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
@@ -68,23 +69,23 @@ func TestHookMysqlAfterComm(t *testing.T) {
 	mock.ExpectExec("insert into communications").WithArgs(
 		AnyID{},
 		"abcdefg",
-		ti.Format(TimeFormat),
+		ti.Format(warp.TimeFormat),
 		"--",
 		[]byte("hello"),
 	).WillReturnResult(sqlmock.NewResult(1, 1))
 
-	data := &AfterCommData{
+	data := &warp.AfterCommData{
 		ConnID:     "abcdefg",
 		OccurredAt: ti,
 		Data:       []byte("hello"),
 		Direction:  "--",
 	}
 
-	mysql := &HookMysql{pool: db}
+	mysql := &Mysql{pool: db}
 	mysql.AfterComm(data)
 }
 
-func TestHookMysqlAfterConn(t *testing.T) {
+func TestMysqlAfterConn(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
@@ -95,13 +96,13 @@ func TestHookMysqlAfterConn(t *testing.T) {
 
 	mock.ExpectExec("insert into connections").WithArgs(
 		"abcdefg",
-		ti.Format(TimeFormat),
+		ti.Format(warp.TimeFormat),
 		[]byte("alice@example.local"),
 		[]byte("bob@example.test"),
 		20,
 	).WillReturnResult(sqlmock.NewResult(1, 1))
 
-	data := &AfterConnData{
+	data := &warp.AfterConnData{
 		ConnID:     "abcdefg",
 		OccurredAt: ti,
 		MailFrom:   []byte("alice@example.local"),
@@ -109,6 +110,6 @@ func TestHookMysqlAfterConn(t *testing.T) {
 		Elapse:     20,
 	}
 
-	mysql := &HookMysql{pool: db}
+	mysql := &Mysql{pool: db}
 	mysql.AfterConn(data)
 }

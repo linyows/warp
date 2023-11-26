@@ -1,4 +1,4 @@
-package warp
+package main
 
 import (
 	"database/sql"
@@ -6,6 +6,7 @@ import (
 	"os"
 
 	_ "github.com/glebarez/go-sqlite"
+	"github.com/linyows/warp"
 )
 
 const (
@@ -29,17 +30,17 @@ const (
 	)`
 )
 
-type HookSqlite struct {
+type Sqlite struct {
 	pool *sql.DB // Database connection pool.
 }
 
-func (h *HookSqlite) Name() string {
+func (s *Sqlite) Name() string {
 	return "sqlite"
 }
 
-func (h *HookSqlite) conn() (*sql.DB, error) {
-	if h.pool != nil {
-		return h.pool, nil
+func (s *Sqlite) conn() (*sql.DB, error) {
+	if s.pool != nil {
+		return s.pool, nil
 	}
 
 	dsn := os.Getenv("DSN")
@@ -48,68 +49,70 @@ func (h *HookSqlite) conn() (*sql.DB, error) {
 	}
 
 	var err error
-	h.pool, err = sql.Open("sqlite", dsn)
+	s.pool, err = sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("sql.Open error: %s(%#v)\n", err.Error(), err)
 	}
 
-	return h.pool, nil
+	return s.pool, nil
 }
 
-func (h *HookSqlite) AfterInit() {
-	conn, err := h.conn()
+func (s *Sqlite) AfterInit() {
+	conn, err := s.conn()
 	if err != nil {
-		fmt.Printf("[%s] %s\n", h.Name(), err)
+		fmt.Printf("[%s] %s\n", s.Name(), err)
 		return
 	}
 
 	_, err = conn.Exec(sqliteConnCreateTable)
 	if err != nil {
-		fmt.Printf("[%s] db exec error: %s\n", h.Name(), err)
+		fmt.Printf("[%s] db exec error: %s\n", s.Name(), err)
 	}
 
 	_, err = conn.Exec(sqliteCommCreateTable)
 	if err != nil {
-		fmt.Printf("[%s] db exec error: %s\n", h.Name(), err)
+		fmt.Printf("[%s] db exec error: %s\n", s.Name(), err)
 	}
 }
 
-func (h *HookSqlite) AfterComm(d *AfterCommData) {
-	conn, err := h.conn()
+func (s *Sqlite) AfterComm(d *warp.AfterCommData) {
+	conn, err := s.conn()
 	if err != nil {
-		fmt.Printf("[%s] %s\n", h.Name(), err)
+		fmt.Printf("[%s] %s\n", s.Name(), err)
 		return
 	}
 
 	_, err = conn.Exec(
 		sqliteCommQuery,
-		GenID().String(),
+		warp.GenID().String(),
 		d.ConnID,
-		d.OccurredAt.Format(TimeFormat),
+		d.OccurredAt.Format(warp.TimeFormat),
 		d.Direction,
 		d.Data,
 	)
 	if err != nil {
-		fmt.Printf("[%s] db exec error: %s\n", h.Name(), err)
+		fmt.Printf("[%s] db exec error: %s\n", s.Name(), err)
 	}
 }
 
-func (h *HookSqlite) AfterConn(d *AfterConnData) {
-	conn, err := h.conn()
+func (s *Sqlite) AfterConn(d *warp.AfterConnData) {
+	conn, err := s.conn()
 	if err != nil {
-		fmt.Printf("[%s] %s\n", h.Name(), err)
+		fmt.Printf("[%s] %s\n", s.Name(), err)
 		return
 	}
 
 	_, err = conn.Exec(
 		sqliteConnQuery,
 		d.ConnID,
-		d.OccurredAt.Format(TimeFormat),
+		d.OccurredAt.Format(warp.TimeFormat),
 		d.MailFrom,
 		d.MailTo,
 		d.Elapse,
 	)
 	if err != nil {
-		fmt.Printf("[%s] db exec error: %s\n", h.Name(), err)
+		fmt.Printf("[%s] db exec error: %s\n", s.Name(), err)
 	}
 }
+
+var Hook Sqlite //nolint

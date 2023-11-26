@@ -1,6 +1,7 @@
-package warp
+package main
 
 import (
+	"database/sql/driver"
 	"fmt"
 	"os"
 	"testing"
@@ -8,9 +9,10 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	_ "github.com/glebarez/go-sqlite"
+	"github.com/linyows/warp"
 )
 
-func TestHookSqliteConst(t *testing.T) {
+func TestSqliteConst(t *testing.T) {
 	var expect string
 	var got string
 
@@ -27,8 +29,8 @@ func TestHookSqliteConst(t *testing.T) {
 	}
 }
 
-func TestHookSqliteName(t *testing.T) {
-	sqlite := &HookSqlite{}
+func TestSqliteName(t *testing.T) {
+	sqlite := &Sqlite{}
 	expect := "sqlite"
 	got := sqlite.Name()
 	if got != expect {
@@ -36,9 +38,9 @@ func TestHookSqliteName(t *testing.T) {
 	}
 }
 
-func TestHookSqliteConn(t *testing.T) {
+func TestSqliteConn(t *testing.T) {
 	expectError := "missing dsn for sqlite, please set `DSN`"
-	sqlite := &HookSqlite{}
+	sqlite := &Sqlite{}
 	_, err := sqlite.conn()
 
 	if err != nil && fmt.Sprintf("%s", err) != expectError {
@@ -46,7 +48,14 @@ func TestHookSqliteConn(t *testing.T) {
 	}
 }
 
-func TestHookSqliteAfterComm(t *testing.T) {
+type AnyID struct{}
+
+func (a AnyID) Match(v driver.Value) bool {
+	_, ok := v.(string)
+	return ok
+}
+
+func TestSqliteAfterComm(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
@@ -58,23 +67,23 @@ func TestHookSqliteAfterComm(t *testing.T) {
 	mock.ExpectExec("insert into communications").WithArgs(
 		AnyID{},
 		"abcdefg",
-		ti.Format(TimeFormat),
+		ti.Format(warp.TimeFormat),
 		"--",
 		[]byte("hello"),
 	).WillReturnResult(sqlmock.NewResult(1, 1))
 
-	data := &AfterCommData{
+	data := &warp.AfterCommData{
 		ConnID:     "abcdefg",
 		OccurredAt: ti,
 		Data:       []byte("hello"),
 		Direction:  "--",
 	}
 
-	sqlite := &HookSqlite{pool: db}
+	sqlite := &Sqlite{pool: db}
 	sqlite.AfterComm(data)
 }
 
-func TestHookSqliteAfterConn(t *testing.T) {
+func TestSqliteAfterConn(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
@@ -85,13 +94,13 @@ func TestHookSqliteAfterConn(t *testing.T) {
 
 	mock.ExpectExec("insert into connections").WithArgs(
 		"abcdefg",
-		ti.Format(TimeFormat),
+		ti.Format(warp.TimeFormat),
 		[]byte("alice@example.local"),
 		[]byte("bob@example.test"),
 		20,
 	).WillReturnResult(sqlmock.NewResult(1, 1))
 
-	data := &AfterConnData{
+	data := &warp.AfterConnData{
 		ConnID:     "abcdefg",
 		OccurredAt: ti,
 		MailFrom:   []byte("alice@example.local"),
@@ -99,29 +108,29 @@ func TestHookSqliteAfterConn(t *testing.T) {
 		Elapse:     20,
 	}
 
-	sqlite := &HookSqlite{pool: db}
+	sqlite := &Sqlite{pool: db}
 	sqlite.AfterConn(data)
 }
 
-func TestHookSqliteIntegration(t *testing.T) {
-	err := os.Setenv("DSN", "./testdata/warp.sqlite")
+func TestSqliteIntegration(t *testing.T) {
+	err := os.Setenv("DSN", ":memory:")
 	if err != nil {
 		t.Fatalf("Setenv error: '%s'", err)
 	}
 
-	sqlite := &HookSqlite{}
+	sqlite := &Sqlite{}
 	sqlite.AfterInit()
 
-	id := GenID().String()
+	id := warp.GenID().String()
 
-	sqlite.AfterComm(&AfterCommData{
+	sqlite.AfterComm(&warp.AfterCommData{
 		ConnID:     id,
 		OccurredAt: time.Now(),
 		Data:       []byte("hello"),
 		Direction:  "->",
 	})
 
-	sqlite.AfterConn(&AfterConnData{
+	sqlite.AfterConn(&warp.AfterConnData{
 		ConnID:     id,
 		OccurredAt: time.Now(),
 		MailFrom:   []byte("alice@example.local"),
