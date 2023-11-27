@@ -2,20 +2,18 @@ SOURCE_FILES?=./...
 TEST_PATTERN?=.
 TEST_OPTIONS?=
 
-GOOS?=linux
-GOARCH?=amd64
-CGO_ENABLED?=0
-
 default: build
 
 setup:
 	go mod download
 
 build:
-	env GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=$(CGO_ENABLED) go build -o warp ./cmd/warp/main.go
+	env CGO_ENABLED=0 go build -o warp ./cmd/warp/main.go
+build-withcgo:
+	env CGO_ENABLED=1 go build -o warp ./cmd/warp/main.go
 
 run:
-	env GOOS=$(GOOS) GOARCH=$(GOARCH) go run ./cmd/warp/main.go
+	go run ./cmd/warp/main.go
 
 test:
 	go test -v -short ./...
@@ -26,8 +24,14 @@ integration: key
 test-all:
 	go test $(TEST_OPTIONS) -failfast -race -coverpkg=./... -covermode=atomic -coverprofile=coverage.txt $(SOURCE_FILES) -run $(TEST_PATTERN) -timeout=5m
 
-slqck-plugin:
-	env GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -buildmode=plugin -o plugins/slack.so plugins/slack/main.go
+file-plugin:
+	go build -buildmode=plugin -o plugins/file.so plugins/file/main.go
+mysql-plugin:
+	go build -buildmode=plugin -o plugins/mysql.so plugins/mysql/main.go
+sqlite-plugin:
+	go build -buildmode=plugin -o plugins/sqlite.so plugins/sqlite/main.go
+slack-plugin:
+	go build -buildmode=plugin -o plugins/slack.so plugins/slack/main.go
 
 key:
 	@rm -rf testdata/server.*
@@ -40,6 +44,7 @@ dist:
 	goreleaser --snapshot --skip-publish --rm-dist
 
 clean:
-	rm -rf plugin/*.so
+	rm -rf plugins/*.so
+	rm -rf dist/*
 
 .PHONY: plugin integration
