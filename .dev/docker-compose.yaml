@@ -8,3 +8,4 @@ services:
       - ../../warp:/go/src/app
       - /go/src/app/.dev/
     tty: true
+    working_dir: /go/src/app
