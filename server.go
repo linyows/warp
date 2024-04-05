@@ -67,9 +67,13 @@ func (s *Server) Start() error {
 			s.log.Printf("accept error(is the warp port open globally?): %s(%#v)", err.Error(), err)
 			continue
 		}
-		if s.Addr == conn.RemoteAddr().String() {
+		remoteAddr, _, err := net.SplitHostPort(conn.RemoteAddr().String())
+		if err != nil {
+			s.log.Printf("failed to extract connection IP: %s(%#v)", err.Error(), err)
+		}
+		if s.Addr == remoteAddr {
 			conn.Close()
-			s.log.Printf("closed connection due to same ip(looping requests to warp?): %s", conn.RemoteAddr())
+			s.log.Printf("closed connection due to same ip(looping requests to warp?): %s", remoteAddr)
 			continue
 		}
 		go s.HandleConnection(conn)
