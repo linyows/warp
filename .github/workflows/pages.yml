@@ -23,8 +23,9 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v3
         with:
-          node-version: "21"
+          node-version: "20"
           cache: npm
+          working-directory: website
       - name: Setup pages
         uses: actions/configure-pages@v2
         with:
@@ -32,6 +33,7 @@ jobs:
       - name: Restore next cache
         uses: actions/cache@v4.0.0
         with:
+          working-directory: website
           path: |
             .next/cache
           key: |
@@ -41,6 +43,7 @@ jobs:
       - name: Restore rotion cache
         uses: actions/cache@v4.0.0
         with:
+          working-directory: website
           path: |
             .cache
             public/images
