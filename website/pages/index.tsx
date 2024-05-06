@@ -2,6 +2,7 @@ import type { GetStaticProps, InferGetStaticPropsType } from 'next'
 import Image from 'next/image'
 import Head from 'next/head'
 import Link from 'next/link'
+import { Inter } from "next/font/google"
 import {
   FetchBlocks,
   FetchPage,
@@ -15,6 +16,8 @@ type Props = {
   logo: string
   blocks: FetchBlocksRes
 }
+
+const inter = Inter({ subsets: ['latin'] })
 
 export const getStaticProps: GetStaticProps<Props> = async (context) => {
   const id = process.env.HOMEPAGE_ID as string
@@ -40,7 +43,7 @@ export default function Home({ logo, icon, blocks }: InferGetStaticPropsType<typ
         <title>Warp</title>
         <link rel="icon" type="image/svg+xml" href={icon} />
       </Head>
-      <div className={styles.box}>
+      <div className={`${styles.box} ${inter.className}`}>
         <div className={styles.layout}>
           <header className={styles.header}>
             <div className={styles.logo}>

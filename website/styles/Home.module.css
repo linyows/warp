@@ -34,17 +34,31 @@
   display: block;
   width: 8rem;
   padding-bottom: 2rem;
+  margin-left: -5rem;
+}
+
+.footerNav::before {
   margin-left: -4rem;
 }
 
 .page h2::before {
-  margin-top: 2rem;
-  padding-bottom: 2rem;
+  padding: 0 0 2rem 0;
+  position: absolute;
+  margin-top: -.7rem;
 }
 
 .page h2 {
-  padding-top: 2rem;
-  font-size: 2rem;
+  font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
+  font-weight: bold;
+  font-size: 1rem;
+  position: relative;
+  margin-top: 2rem;
+  padding: .7rem .2rem .5rem 1rem;
+  letter-spacing: .8rem;
+  text-transform: uppercase;
+  background-color: rgb(var(--foreground-rgb));
+  color: rgb(var(--background-end-rgb));
+  display: inline-block;
 }
 
 .footer {
