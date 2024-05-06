@@ -25,7 +25,7 @@ jobs:
         with:
           node-version: "20"
           cache: npm
-          working-directory: website
+          cache-dependency-path: website/package-lock.json
       - name: Setup pages
         uses: actions/configure-pages@v2
         with:
@@ -33,9 +33,8 @@ jobs:
       - name: Restore next cache
         uses: actions/cache@v4.0.0
         with:
-          working-directory: website
           path: |
-            .next/cache
+            website/.next/cache
           key: |
             ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json', '**/yarn.lock') }}-${{ hashFiles('**.[jt]s', '**.[jt]sx') }}
           restore-keys: |
@@ -43,10 +42,9 @@ jobs:
       - name: Restore rotion cache
         uses: actions/cache@v4.0.0
         with:
-          working-directory: website
           path: |
-            .cache
-            public/images
+            website/.cache
+            website/public/images
           key: rotion
           restore-keys: rotion
       - name: Install dependencies
