@@ -46,8 +46,8 @@ type Direction string
 type Elapse int
 
 const (
-	mailFromPrefix string = "MAIL FROM:<"
-	rcptToPrefix   string = "RCPT TO:<"
+	mailFromPrefix string = "(?i)MAIL FROM:<"
+	rcptToPrefix   string = "(?i)RCPT TO:<"
 	mailRegex      string = `[A-z0-9.!#$%&'*+\-/=?^_\{|}~]{1,64}@[A-z0-9.\-]{1,255}`
 	crlf           string = "\r\n"
 	mailHeaderEnd  string = crlf + crlf
