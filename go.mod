@@ -1,10 +1,10 @@
 module github.com/linyows/warp
 
-go 1.18
+go 1.21.0
 
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.0
-	github.com/go-sql-driver/mysql v1.7.1
+	github.com/go-sql-driver/mysql v1.9.3
 	github.com/oklog/ulid v1.3.1
 )
 
@@ -14,6 +14,7 @@ require (
 )
 
 require (
+	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/davecgh/go-spew v1.1.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/golang/protobuf v1.2.0 // indirect
