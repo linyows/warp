@@ -46,12 +46,14 @@ type Direction string
 type Elapse int
 
 const (
-	mailFromPrefix string = "MAIL FROM:<"
-	rcptToPrefix   string = "RCPT TO:<"
-	mailRegex      string = `(?i)MAIL FROM:<[A-z0-9.!#$%&'*+\-/=?^_\{|}~]{1,64}@[A-z0-9.\-]{1,255}>`
-	rcptToRegex    string = `(?i)RCPT TO:<[A-z0-9.!#$%&'*+\-/=?^_\{|}~]{1,64}@[A-z0-9.\-]{1,255}>`
-	crlf           string = "\r\n"
-	mailHeaderEnd  string = crlf + crlf
+	mailFromPrefix       string = "MAIL FROM:<"
+	rcptToPrefix         string = "RCPT TO:<"
+	mailRegex            string = `(?i)MAIL\s+FROM\s*:\s*<[A-z0-9.!#$%&'*+\-/=?^_\{|}~]{1,64}@[A-z0-9.\-]{1,255}>`
+	rcptToRegex          string = `(?i)RCPT\s+TO\s*:\s*<[A-z0-9.!#$%&'*+\-/=?^_\{|}~]{1,64}@[A-z0-9.\-]{1,255}>`
+	mailRegexStrict      string = `(?i)MAIL FROM:<[A-z0-9.!#$%&'*+\-/=?^_\{|}~]{1,64}@[A-z0-9.\-]{1,255}>`
+	rcptToRegexStrict    string = `(?i)RCPT TO:<[A-z0-9.!#$%&'*+\-/=?^_\{|}~]{1,64}@[A-z0-9.\-]{1,255}>`
+	crlf                 string = "\r\n"
+	mailHeaderEnd        string = crlf + crlf
 
 	srcToPxy Direction = ">|"
 	pxyToDst Direction = "|>"
@@ -71,8 +73,10 @@ const (
 )
 
 var (
-	mailFromRegex = regexp.MustCompile(mailRegex)
-	mailToRegex   = regexp.MustCompile(rcptToRegex)
+	mailFromRegex       = regexp.MustCompile(mailRegex)
+	mailToRegex         = regexp.MustCompile(rcptToRegex)
+	mailFromRegexStrict = regexp.MustCompile(mailRegexStrict)
+	mailToRegexStrict   = regexp.MustCompile(rcptToRegexStrict)
 )
 
 func (e Elapse) String() string {
@@ -108,6 +112,13 @@ func containsFold(s, substr []byte) bool {
 		}
 	}
 	return false
+}
+
+// isRFCCompliant checks if the matched command strictly follows RFC 5321 syntax
+// RFC 5321 Section 3.3: "spaces are not permitted on either side of the colon
+// following FROM in the MAIL command or TO in the RCPT command"
+func isRFCCompliant(match []byte, strictRegex *regexp.Regexp) bool {
+	return strictRegex.Match(match)
 }
 
 func (p *Pipe) mediateOnUpstream(b []byte, i int) ([]byte, int, bool) {
@@ -232,34 +243,40 @@ func (p *Pipe) setSenderServerName(b []byte) {
 }
 
 func (p *Pipe) setSenderMailAddress(b []byte) {
-	if containsFold(b, []byte(mailFromPrefix)) {
-		match := mailFromRegex.Find(b)
-		if match != nil {
-			// Extract email address from "MAIL FROM:<email>" (case-insensitive)
-			// Find the position of '<' and '>'
-			start := bytes.IndexByte(match, '<')
-			end := bytes.IndexByte(match, '>')
-			if start >= 0 && end > start {
-				p.sMailAddr = match[start+1 : end]
+	match := mailFromRegex.Find(b)
+	if match != nil {
+		// Extract email address from "MAIL FROM:<email>" (case-insensitive, relaxed spacing)
+		// Find the position of '<' and '>'
+		start := bytes.IndexByte(match, '<')
+		end := bytes.IndexByte(match, '>')
+		if start >= 0 && end > start {
+			p.sMailAddr = match[start+1 : end]
+
+			// Check RFC 5321 compliance
+			if !isRFCCompliant(match, mailFromRegexStrict) {
+				go p.afterCommHook([]byte(fmt.Sprintf("RFC 5321 violation: %q (spaces not permitted around colon)", match)), onPxy)
 			}
 		}
 	}
 }
 
 func (p *Pipe) setReceiverMailAddressAndServerName(b []byte) {
-	if containsFold(b, []byte(rcptToPrefix)) {
-		match := mailToRegex.Find(b)
-		if match != nil {
-			// Extract email address from "RCPT TO:<email>" (case-insensitive)
-			// Find the position of '<' and '>'
-			start := bytes.IndexByte(match, '<')
-			end := bytes.IndexByte(match, '>')
-			if start >= 0 && end > start {
-				p.rMailAddr = match[start+1 : end]
-				parts := bytes.Split(p.rMailAddr, []byte("@"))
-				if len(parts) == 2 {
-					p.rServerName = parts[1]
-				}
+	match := mailToRegex.Find(b)
+	if match != nil {
+		// Extract email address from "RCPT TO:<email>" (case-insensitive, relaxed spacing)
+		// Find the position of '<' and '>'
+		start := bytes.IndexByte(match, '<')
+		end := bytes.IndexByte(match, '>')
+		if start >= 0 && end > start {
+			p.rMailAddr = match[start+1 : end]
+			parts := bytes.Split(p.rMailAddr, []byte("@"))
+			if len(parts) == 2 {
+				p.rServerName = parts[1]
+			}
+
+			// Check RFC 5321 compliance
+			if !isRFCCompliant(match, mailToRegexStrict) {
+				go p.afterCommHook([]byte(fmt.Sprintf("RFC 5321 violation: %q (spaces not permitted around colon)", match)), onPxy)
 			}
 		}
 	}
