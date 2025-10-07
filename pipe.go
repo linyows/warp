@@ -46,9 +46,10 @@ type Direction string
 type Elapse int
 
 const (
-	mailFromPrefix string = "(?i)MAIL FROM:<"
-	rcptToPrefix   string = "(?i)RCPT TO:<"
-	mailRegex      string = `[A-z0-9.!#$%&'*+\-/=?^_\{|}~]{1,64}@[A-z0-9.\-]{1,255}`
+	mailFromPrefix string = "MAIL FROM:<"
+	rcptToPrefix   string = "RCPT TO:<"
+	mailRegex      string = `(?i)MAIL FROM:<[A-z0-9.!#$%&'*+\-/=?^_\{|}~]{1,64}@[A-z0-9.\-]{1,255}>`
+	rcptToRegex    string = `(?i)RCPT TO:<[A-z0-9.!#$%&'*+\-/=?^_\{|}~]{1,64}@[A-z0-9.\-]{1,255}>`
 	crlf           string = "\r\n"
 	mailHeaderEnd  string = crlf + crlf
 
@@ -70,12 +71,43 @@ const (
 )
 
 var (
-	mailFromRegex = regexp.MustCompile(mailFromPrefix + mailRegex)
-	mailToRegex   = regexp.MustCompile(rcptToPrefix + mailRegex)
+	mailFromRegex = regexp.MustCompile(mailRegex)
+	mailToRegex   = regexp.MustCompile(rcptToRegex)
 )
 
 func (e Elapse) String() string {
 	return fmt.Sprintf("%d msec", e)
+}
+
+// toLower converts ASCII byte to lowercase
+func toLower(b byte) byte {
+	if b >= 'A' && b <= 'Z' {
+		return b + ('a' - 'A')
+	}
+	return b
+}
+
+// containsFold performs case-insensitive bytes.Contains for ASCII
+func containsFold(s, substr []byte) bool {
+	if len(substr) == 0 {
+		return true
+	}
+	if len(substr) > len(s) {
+		return false
+	}
+	for i := 0; i <= len(s)-len(substr); i++ {
+		match := true
+		for j := 0; j < len(substr); j++ {
+			if toLower(s[i+j]) != toLower(substr[j]) {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *Pipe) mediateOnUpstream(b []byte, i int) ([]byte, int, bool) {
@@ -181,24 +213,55 @@ func (p *Pipe) Do() {
 }
 
 func (p *Pipe) setSenderServerName(b []byte) {
-	if bytes.Contains(b, []byte("HELO")) {
-		p.sServerName = bytes.TrimSpace(bytes.Replace(b, []byte("HELO"), []byte(""), 1))
+	if containsFold(b, []byte("HELO ")) {
+		// Find the position of HELO (case-insensitive) and extract the hostname
+		upper := bytes.ToUpper(b)
+		idx := bytes.Index(upper, []byte("HELO "))
+		if idx >= 0 {
+			p.sServerName = bytes.TrimSpace(b[idx+5:])
+		}
 	}
-	if bytes.Contains(b, []byte("EHLO")) {
-		p.sServerName = bytes.TrimSpace(bytes.Replace(b, []byte("EHLO"), []byte(""), 1))
+	if containsFold(b, []byte("EHLO ")) {
+		// Find the position of EHLO (case-insensitive) and extract the hostname
+		upper := bytes.ToUpper(b)
+		idx := bytes.Index(upper, []byte("EHLO "))
+		if idx >= 0 {
+			p.sServerName = bytes.TrimSpace(b[idx+5:])
+		}
 	}
 }
 
 func (p *Pipe) setSenderMailAddress(b []byte) {
-	if bytes.Contains(b, []byte(mailFromPrefix)) {
-		p.sMailAddr = bytes.Replace(mailFromRegex.Find(b), []byte(mailFromPrefix), []byte(""), 1)
+	if containsFold(b, []byte(mailFromPrefix)) {
+		match := mailFromRegex.Find(b)
+		if match != nil {
+			// Extract email address from "MAIL FROM:<email>" (case-insensitive)
+			// Find the position of '<' and '>'
+			start := bytes.IndexByte(match, '<')
+			end := bytes.IndexByte(match, '>')
+			if start >= 0 && end > start {
+				p.sMailAddr = match[start+1 : end]
+			}
+		}
 	}
 }
 
 func (p *Pipe) setReceiverMailAddressAndServerName(b []byte) {
-	if bytes.Contains(b, []byte(rcptToPrefix)) {
-		p.rMailAddr = bytes.Replace(mailToRegex.Find(b), []byte(rcptToPrefix), []byte(""), 1)
-		p.rServerName = bytes.Split(p.rMailAddr, []byte("@"))[1]
+	if containsFold(b, []byte(rcptToPrefix)) {
+		match := mailToRegex.Find(b)
+		if match != nil {
+			// Extract email address from "RCPT TO:<email>" (case-insensitive)
+			// Find the position of '<' and '>'
+			start := bytes.IndexByte(match, '<')
+			end := bytes.IndexByte(match, '>')
+			if start >= 0 && end > start {
+				p.rMailAddr = match[start+1 : end]
+				parts := bytes.Split(p.rMailAddr, []byte("@"))
+				if len(parts) == 2 {
+					p.rServerName = parts[1]
+				}
+			}
+		}
 	}
 }
 
