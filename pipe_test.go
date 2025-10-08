@@ -6,7 +6,7 @@ import (
 )
 
 func TestSetSenderServerName(t *testing.T) {
-	var tests = []struct {
+	tests := []struct {
 		arg                []byte
 		expectSenderServer []byte
 	}{
@@ -49,7 +49,7 @@ func TestSetSenderServerName(t *testing.T) {
 }
 
 func TestSetSenderMailAddress(t *testing.T) {
-	var tests = []struct {
+	tests := []struct {
 		arg              []byte
 		expectSenderAddr []byte
 	}{
@@ -88,7 +88,7 @@ func TestSetSenderMailAddress(t *testing.T) {
 }
 
 func TestSetReceiverMailAddressAndServerName(t *testing.T) {
-	var tests = []struct {
+	tests := []struct {
 		arg                  []byte
 		expectReceiverServer []byte
 		expectReceiverAddr   []byte
@@ -160,7 +160,7 @@ func TestIsResponseOfReadyToStartTLS(t *testing.T) {
 }
 
 func TestRemoveStartTLSCommand(t *testing.T) {
-	var tests = []struct {
+	tests := []struct {
 		ehloResp []byte
 		ehloSize int
 		expeResp []byte
@@ -206,7 +206,7 @@ func TestRemoveStartTLSCommand(t *testing.T) {
 }
 
 func TestElapseString(t *testing.T) {
-	var tests = []struct {
+	tests := []struct {
 		elapse Elapse
 		expect string
 	}{
@@ -225,7 +225,7 @@ func TestElapseString(t *testing.T) {
 }
 
 func TestElapse(t *testing.T) {
-	var tests = []struct {
+	tests := []struct {
 		start  time.Time
 		stop   time.Time
 		expect Elapse

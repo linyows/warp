@@ -56,7 +56,7 @@ func main() {
 }
 
 func buildVersion(version, commit, date, builtBy string) string {
-	var result = version
+	result := version
 	if commit != "" {
 		result = fmt.Sprintf("%s\ncommit: %s", result, commit)
 	}

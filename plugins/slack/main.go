@@ -9,8 +9,7 @@ import (
 	"github.com/linyows/warp"
 )
 
-type Slack struct {
-}
+type Slack struct{}
 
 func (s *Slack) Notify(msg string) error {
 	username := "Warp"

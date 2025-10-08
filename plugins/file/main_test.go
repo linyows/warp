@@ -61,7 +61,7 @@ func TestFileName(t *testing.T) {
 }
 
 func TestFileWriter(t *testing.T) {
-	var tests = []struct {
+	tests := []struct {
 		expectFileName string
 		expectError    string
 		envName        string
