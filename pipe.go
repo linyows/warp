@@ -46,11 +46,14 @@ type Direction string
 type Elapse int
 
 const (
-	mailFromPrefix string = "MAIL FROM:<"
-	rcptToPrefix   string = "RCPT TO:<"
-	mailRegex      string = `[A-z0-9.!#$%&'*+\-/=?^_\{|}~]{1,64}@[A-z0-9.\-]{1,255}`
-	crlf           string = "\r\n"
-	mailHeaderEnd  string = crlf + crlf
+	mailFromPrefix       string = "MAIL FROM:<"
+	rcptToPrefix         string = "RCPT TO:<"
+	mailRegex            string = `(?i)MAIL\s+FROM\s*:\s*<[A-z0-9.!#$%&'*+\-/=?^_\{|}~]{1,64}@[A-z0-9.\-]{1,255}>`
+	rcptToRegex          string = `(?i)RCPT\s+TO\s*:\s*<[A-z0-9.!#$%&'*+\-/=?^_\{|}~]{1,64}@[A-z0-9.\-]{1,255}>`
+	mailRegexStrict      string = `(?i)MAIL FROM:<[A-z0-9.!#$%&'*+\-/=?^_\{|}~]{1,64}@[A-z0-9.\-]{1,255}>`
+	rcptToRegexStrict    string = `(?i)RCPT TO:<[A-z0-9.!#$%&'*+\-/=?^_\{|}~]{1,64}@[A-z0-9.\-]{1,255}>`
+	crlf                 string = "\r\n"
+	mailHeaderEnd        string = crlf + crlf
 
 	srcToPxy Direction = ">|"
 	pxyToDst Direction = "|>"
@@ -70,12 +73,52 @@ const (
 )
 
 var (
-	mailFromRegex = regexp.MustCompile(mailFromPrefix + mailRegex)
-	mailToRegex   = regexp.MustCompile(rcptToPrefix + mailRegex)
+	mailFromRegex       = regexp.MustCompile(mailRegex)
+	mailToRegex         = regexp.MustCompile(rcptToRegex)
+	mailFromRegexStrict = regexp.MustCompile(mailRegexStrict)
+	mailToRegexStrict   = regexp.MustCompile(rcptToRegexStrict)
 )
 
 func (e Elapse) String() string {
 	return fmt.Sprintf("%d msec", e)
+}
+
+// toLower converts ASCII byte to lowercase
+func toLower(b byte) byte {
+	if b >= 'A' && b <= 'Z' {
+		return b + ('a' - 'A')
+	}
+	return b
+}
+
+// containsFold performs case-insensitive bytes.Contains for ASCII
+func containsFold(s, substr []byte) bool {
+	if len(substr) == 0 {
+		return true
+	}
+	if len(substr) > len(s) {
+		return false
+	}
+	for i := 0; i <= len(s)-len(substr); i++ {
+		match := true
+		for j := 0; j < len(substr); j++ {
+			if toLower(s[i+j]) != toLower(substr[j]) {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
+}
+
+// isRFCCompliant checks if the matched command strictly follows RFC 5321 syntax
+// RFC 5321 Section 3.3: "spaces are not permitted on either side of the colon
+// following FROM in the MAIL command or TO in the RCPT command"
+func isRFCCompliant(match []byte, strictRegex *regexp.Regexp) bool {
+	return strictRegex.Match(match)
 }
 
 func (p *Pipe) mediateOnUpstream(b []byte, i int) ([]byte, int, bool) {
@@ -181,24 +224,61 @@ func (p *Pipe) Do() {
 }
 
 func (p *Pipe) setSenderServerName(b []byte) {
-	if bytes.Contains(b, []byte("HELO")) {
-		p.sServerName = bytes.TrimSpace(bytes.Replace(b, []byte("HELO"), []byte(""), 1))
+	if containsFold(b, []byte("HELO ")) {
+		// Find the position of HELO (case-insensitive) and extract the hostname
+		upper := bytes.ToUpper(b)
+		idx := bytes.Index(upper, []byte("HELO "))
+		if idx >= 0 {
+			p.sServerName = bytes.TrimSpace(b[idx+5:])
+		}
 	}
-	if bytes.Contains(b, []byte("EHLO")) {
-		p.sServerName = bytes.TrimSpace(bytes.Replace(b, []byte("EHLO"), []byte(""), 1))
+	if containsFold(b, []byte("EHLO ")) {
+		// Find the position of EHLO (case-insensitive) and extract the hostname
+		upper := bytes.ToUpper(b)
+		idx := bytes.Index(upper, []byte("EHLO "))
+		if idx >= 0 {
+			p.sServerName = bytes.TrimSpace(b[idx+5:])
+		}
 	}
 }
 
 func (p *Pipe) setSenderMailAddress(b []byte) {
-	if bytes.Contains(b, []byte(mailFromPrefix)) {
-		p.sMailAddr = bytes.Replace(mailFromRegex.Find(b), []byte(mailFromPrefix), []byte(""), 1)
+	match := mailFromRegex.Find(b)
+	if match != nil {
+		// Extract email address from "MAIL FROM:<email>" (case-insensitive, relaxed spacing)
+		// Find the position of '<' and '>'
+		start := bytes.IndexByte(match, '<')
+		end := bytes.IndexByte(match, '>')
+		if start >= 0 && end > start {
+			p.sMailAddr = match[start+1 : end]
+
+			// Check RFC 5321 compliance
+			if !isRFCCompliant(match, mailFromRegexStrict) {
+				go p.afterCommHook([]byte(fmt.Sprintf("RFC 5321 violation: %q (spaces not permitted around colon)", match)), onPxy)
+			}
+		}
 	}
 }
 
 func (p *Pipe) setReceiverMailAddressAndServerName(b []byte) {
-	if bytes.Contains(b, []byte(rcptToPrefix)) {
-		p.rMailAddr = bytes.Replace(mailToRegex.Find(b), []byte(rcptToPrefix), []byte(""), 1)
-		p.rServerName = bytes.Split(p.rMailAddr, []byte("@"))[1]
+	match := mailToRegex.Find(b)
+	if match != nil {
+		// Extract email address from "RCPT TO:<email>" (case-insensitive, relaxed spacing)
+		// Find the position of '<' and '>'
+		start := bytes.IndexByte(match, '<')
+		end := bytes.IndexByte(match, '>')
+		if start >= 0 && end > start {
+			p.rMailAddr = match[start+1 : end]
+			parts := bytes.Split(p.rMailAddr, []byte("@"))
+			if len(parts) == 2 {
+				p.rServerName = parts[1]
+			}
+
+			// Check RFC 5321 compliance
+			if !isRFCCompliant(match, mailToRegexStrict) {
+				go p.afterCommHook([]byte(fmt.Sprintf("RFC 5321 violation: %q (spaces not permitted around colon)", match)), onPxy)
+			}
+		}
 	}
 }
 

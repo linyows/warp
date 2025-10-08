@@ -18,6 +18,26 @@ func TestSetSenderServerName(t *testing.T) {
 			arg:                []byte("HELO mx.example.local\r\n"),
 			expectSenderServer: []byte("mx.example.local"),
 		},
+		{
+			// Case-insensitive: lowercase
+			arg:                []byte("ehlo mx.example.local\r\n"),
+			expectSenderServer: []byte("mx.example.local"),
+		},
+		{
+			// Case-insensitive: lowercase
+			arg:                []byte("helo mx.example.local\r\n"),
+			expectSenderServer: []byte("mx.example.local"),
+		},
+		{
+			// Case-insensitive: mixed case
+			arg:                []byte("Ehlo mx.example.local\r\n"),
+			expectSenderServer: []byte("mx.example.local"),
+		},
+		{
+			// Case-insensitive: mixed case
+			arg:                []byte("Helo mx.example.local\r\n"),
+			expectSenderServer: []byte("mx.example.local"),
+		},
 	}
 	for _, v := range tests {
 		pipe := &Pipe{afterCommHook: func(b Data, to Direction) {}}
@@ -47,6 +67,16 @@ func TestSetSenderMailAddress(t *testing.T) {
 			arg:              []byte("MAIL FROM:<bob@example.local> SIZE=4095\r\nRCPT TO:<alice@example.com> ORCPT=rfc822;bob@example.local\r\nDATA\r\n"),
 			expectSenderAddr: []byte("bob@example.local"),
 		},
+		{
+			// Case-insensitive: lowercase
+			arg:              []byte("mail from:<alice@example.test> SIZE=4095\r\n"),
+			expectSenderAddr: []byte("alice@example.test"),
+		},
+		{
+			// Case-insensitive: mixed case
+			arg:              []byte("Mail From:<charlie@example.net> SIZE=4095\r\n"),
+			expectSenderAddr: []byte("charlie@example.net"),
+		},
 	}
 	for _, v := range tests {
 		pipe := &Pipe{afterCommHook: func(b Data, to Direction) {}}
@@ -73,6 +103,18 @@ func TestSetReceiverMailAddressAndServerName(t *testing.T) {
 			arg:                  []byte("MAIL FROM:<bob@example.local> SIZE=4095\r\nRCPT TO:<alice@example.com> ORCPT=rfc822;bob@example.local\r\nDATA\r\n"),
 			expectReceiverServer: []byte("example.com"),
 			expectReceiverAddr:   []byte("alice@example.com"),
+		},
+		{
+			// Case-insensitive: lowercase
+			arg:                  []byte("rcpt to:<bob@example.org>\r\n"),
+			expectReceiverServer: []byte("example.org"),
+			expectReceiverAddr:   []byte("bob@example.org"),
+		},
+		{
+			// Case-insensitive: mixed case
+			arg:                  []byte("Rcpt To:<charlie@example.net>\r\n"),
+			expectReceiverServer: []byte("example.net"),
+			expectReceiverAddr:   []byte("charlie@example.net"),
 		},
 	}
 	for _, v := range tests {
