@@ -39,21 +39,23 @@ type Pipe struct {
 	afterConnHook func()
 }
 
-type Mediator func([]byte, int) ([]byte, int, bool)
-type Flow int
-type Data []byte
-type Direction string
-type Elapse int
+type (
+	Mediator  func([]byte, int) ([]byte, int, bool)
+	Flow      int
+	Data      []byte
+	Direction string
+	Elapse    int
+)
 
 const (
-	mailFromPrefix       string = "MAIL FROM:<"
-	rcptToPrefix         string = "RCPT TO:<"
-	mailRegex            string = `(?i)MAIL\s+FROM\s*:\s*<[A-z0-9.!#$%&'*+\-/=?^_\{|}~]{1,64}@[A-z0-9.\-]{1,255}>`
-	rcptToRegex          string = `(?i)RCPT\s+TO\s*:\s*<[A-z0-9.!#$%&'*+\-/=?^_\{|}~]{1,64}@[A-z0-9.\-]{1,255}>`
-	mailRegexStrict      string = `(?i)MAIL FROM:<[A-z0-9.!#$%&'*+\-/=?^_\{|}~]{1,64}@[A-z0-9.\-]{1,255}>`
-	rcptToRegexStrict    string = `(?i)RCPT TO:<[A-z0-9.!#$%&'*+\-/=?^_\{|}~]{1,64}@[A-z0-9.\-]{1,255}>`
-	crlf                 string = "\r\n"
-	mailHeaderEnd        string = crlf + crlf
+	mailFromPrefix    string = "MAIL FROM:<"
+	rcptToPrefix      string = "RCPT TO:<"
+	mailRegex         string = `(?i)MAIL\s+FROM\s*:\s*<[A-z0-9.!#$%&'*+\-/=?^_\{|}~]{1,64}@[A-z0-9.\-]{1,255}>`
+	rcptToRegex       string = `(?i)RCPT\s+TO\s*:\s*<[A-z0-9.!#$%&'*+\-/=?^_\{|}~]{1,64}@[A-z0-9.\-]{1,255}>`
+	mailRegexStrict   string = `(?i)MAIL FROM:<[A-z0-9.!#$%&'*+\-/=?^_\{|}~]{1,64}@[A-z0-9.\-]{1,255}>`
+	rcptToRegexStrict string = `(?i)RCPT TO:<[A-z0-9.!#$%&'*+\-/=?^_\{|}~]{1,64}@[A-z0-9.\-]{1,255}>`
+	crlf              string = "\r\n"
+	mailHeaderEnd     string = crlf + crlf
 
 	srcToPxy Direction = ">|"
 	pxyToDst Direction = "|>"
@@ -300,8 +302,9 @@ func (p *Pipe) copy(dr Flow, fn Mediator) (written int64, err error) {
 	size := p.bufferSize
 	src, ok := p.src(dr).(io.Reader)
 	if !ok {
-		err = fmt.Errorf("io.Reader cast error")
+		return 0, fmt.Errorf("io.Reader cast error")
 	}
+
 	if l, ok := src.(*io.LimitedReader); ok && int64(size) > l.N {
 		if l.N < 1 {
 			size = 1
@@ -315,11 +318,13 @@ func (p *Pipe) copy(dr Flow, fn Mediator) (written int64, err error) {
 	for {
 		var isContinue bool
 		if p.locked {
+			time.Sleep(10 * time.Millisecond)
 			continue
 		}
 
 		nr, er := p.src(dr).Read(buf)
-		if nr > 0 {
+		switch {
+		case nr > 0:
 			// Run the Mediator!
 			buf, nr, isContinue = fn(buf, nr)
 			if nr == 0 || isContinue {
@@ -329,24 +334,23 @@ func (p *Pipe) copy(dr Flow, fn Mediator) (written int64, err error) {
 			if nw > 0 {
 				written += int64(nw)
 			}
-			if ew != nil {
-				err = ew
-				break
+
+			switch {
+			case ew != nil:
+				return written, ew
+			case nr != nw:
+				return written, io.ErrShortWrite
 			}
-			if nr != nw {
-				err = io.ErrShortWrite
-				break
+
+		case er != nil:
+			switch er {
+			case io.EOF:
+				return written, nil
+			default:
+				return written, er
 			}
-		}
-		if er != nil {
-			if er != io.EOF {
-				err = er
-			}
-			break
 		}
 	}
-
-	return written, err
 }
 
 func (p *Pipe) cmd(format string, args ...interface{}) error {

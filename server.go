@@ -82,6 +82,7 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) HandleConnection(conn net.Conn) {
+	defer conn.Close()
 	uuid := GenID().String()
 	if s.Verbose {
 		s.log.Printf("%s %s connected from %s", uuid, onPxy, conn.RemoteAddr())
@@ -170,7 +171,6 @@ func (s *Server) HandleConnection(conn net.Conn) {
 	}
 
 	p.Do()
-	p.Close()
 }
 
 func (s *Server) OriginalAddrDst(conn net.Conn) (*net.TCPAddr, error) {

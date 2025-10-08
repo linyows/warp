@@ -27,6 +27,8 @@ func WaitForServerListen(ip string, port int) {
 		conn, err := net.DialTimeout("tcp", host, timeout)
 		if err != nil {
 			fmt.Print(".")
+			time.Sleep(100 * time.Millisecond)
+			continue
 		}
 		if conn != nil {
 			fmt.Print("\n")
