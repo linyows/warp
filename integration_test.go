@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"log"
+	"strings"
 	"testing"
 	"time"
 )
@@ -22,6 +23,8 @@ func TestIntegration(t *testing.T) {
 		warpLog bytes.Buffer
 		smtpLog bytes.Buffer
 	)
+
+	messages := make(chan ReceivedMessage, 1)
 
 	go func() {
 		specifiedDstIP = ip
@@ -43,6 +46,9 @@ func TestIntegration(t *testing.T) {
 			Port:     smtpPort,
 			Hostname: hostname,
 			log:      log.New(&smtpLog, "", log.Ldate|log.Ltime|log.Lmicroseconds),
+			OnMessage: func(msg ReceivedMessage) {
+				messages <- msg
+			},
 		}
 		if err := s.Serve(); err != nil {
 			t.Errorf("smtp server raised error: %s", err)
@@ -54,12 +60,23 @@ func TestIntegration(t *testing.T) {
 
 	c := &SMTPClient{IP: ip, Port: warpPort}
 	err := c.SendEmail()
-	time.Sleep(1 * time.Second)
 
 	fmt.Printf("\nWarp Server:\n%s", &warpLog)
 	fmt.Printf("\nSMTP Server:\n%s\n", &smtpLog)
 
 	if err != nil {
-		t.Errorf("smtp client raised error: %s", err)
+		t.Fatalf("smtp client raised error: %s", err)
+	}
+
+	select {
+	case msg := <-messages:
+		if msg.MailFrom != "alice@example.test" {
+			t.Errorf("MailFrom = %q, want %q", msg.MailFrom, "alice@example.test")
+		}
+		if !strings.Contains(string(msg.Data), "Subject: Test") {
+			t.Errorf("Data does not contain 'Subject: Test': %s", string(msg.Data[:min(len(msg.Data), 200)]))
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for message from SMTP server")
 	}
 }
