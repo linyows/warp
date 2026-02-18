@@ -290,24 +290,50 @@ func TestIsDataCommand(t *testing.T) {
 	}
 }
 
-func TestIsActionCompletedResponse(t *testing.T) {
+func TestHasResponseCode(t *testing.T) {
 	tests := []struct {
 		name   string
 		input  []byte
+		code   int
 		expect bool
 	}{
-		{"250 OK", []byte("250 2.0.0 Ok: queued\r\n"), true},
-		{"250 plain", []byte("250 Ok\r\n"), true},
-		{"354 response", []byte("354 End data with <CR><LF>.<CR><LF>\r\n"), false},
-		{"550 error", []byte("550 5.7.1 Spam detected\r\n"), false},
-		{"empty", []byte(""), false},
+		{"250 OK", []byte("250 2.0.0 Ok: queued\r\n"), 250, true},
+		{"250 plain", []byte("250 Ok\r\n"), 250, true},
+		{"354 response for 354", []byte("354 End data with <CR><LF>.<CR><LF>\r\n"), 354, true},
+		{"354 response for 250", []byte("354 End data with <CR><LF>.<CR><LF>\r\n"), 250, false},
+		{"550 error", []byte("550 5.7.1 Spam detected\r\n"), 250, false},
+		{"empty", []byte(""), 250, false},
+		{"250 in body text not at start", []byte("Hi, your order #250 is ready\r\n"), 250, false},
+		{"250 at second line start", []byte("OK your items\r\n250 Done\r\n"), 250, true},
+		{"no false match on 2500", []byte("2500 items\r\n"), 250, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			p := &Pipe{}
-			got := p.isActionCompletedResponse(tt.input)
+			got := p.hasResponseCode(tt.input, tt.code)
 			if got != tt.expect {
-				t.Errorf("isActionCompletedResponse(%q) = %v, want %v", tt.input, got, tt.expect)
+				t.Errorf("hasResponseCode(%q, %d) = %v, want %v", tt.input, tt.code, got, tt.expect)
+			}
+		})
+	}
+}
+
+func TestSanitizeReply(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		expect string
+	}{
+		{"normal reply", "550 5.7.1 Spam detected", "550 5.7.1 Spam detected"},
+		{"with CRLF injection", "550 bad\r\n250 fake ok", "550 bad250 fake ok"},
+		{"with LF only", "550 bad\n250 fake ok", "550 bad250 fake ok"},
+		{"empty", "", "550 5.7.0 Message rejected"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sanitizeReply(tt.input)
+			if got != tt.expect {
+				t.Errorf("sanitizeReply(%q) = %q, want %q", tt.input, got, tt.expect)
 			}
 		})
 	}
@@ -803,5 +829,172 @@ func TestMediateOnUpstream_MetadataExtractionWithFilterHook(t *testing.T) {
 
 	if string(p.sMailAddr) != "alice@example.test" {
 		t.Errorf("sMailAddr = %q, want %q", p.sMailAddr, "alice@example.test")
+	}
+}
+
+func TestHandleDataPhaseUpstream_NilResult(t *testing.T) {
+	p, _, rRemote := newTestPipeWithConns(t)
+	p.inDataPhase = true
+	p.dataBuffer = &bytes.Buffer{}
+
+	// Hook returns nil — should fallback to FilterRelay
+	p.beforeRelayHook = func(data *BeforeRelayData) *FilterResult {
+		return nil
+	}
+
+	var rBuf bytes.Buffer
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		buf := make([]byte, 4096)
+		for {
+			n, err := rRemote.Read(buf)
+			if n > 0 {
+				rBuf.Write(buf[:n])
+			}
+			if bytes.Contains(rBuf.Bytes(), []byte(".\r\n")) || err != nil {
+				break
+			}
+		}
+	}()
+
+	message := []byte("Subject: test\r\n\r\nBody\r\n.\r\n")
+	buf := make([]byte, len(message))
+	copy(buf, message)
+
+	_, _, isContinue := p.handleDataPhaseUpstream(buf, len(message))
+	wg.Wait()
+
+	if !isContinue {
+		t.Error("expected isContinue=true")
+	}
+	// Should relay the message (fallback to FilterRelay)
+	if !bytes.Contains(rBuf.Bytes(), []byte("Subject: test")) {
+		t.Errorf("expected message to be relayed on nil result, got %q", rBuf.String())
+	}
+}
+
+func TestHandleDataPhaseUpstream_UnknownAction(t *testing.T) {
+	p, _, rRemote := newTestPipeWithConns(t)
+	p.inDataPhase = true
+	p.dataBuffer = &bytes.Buffer{}
+
+	// Hook returns unknown action — should fallback to FilterRelay
+	p.beforeRelayHook = func(data *BeforeRelayData) *FilterResult {
+		return &FilterResult{Action: FilterAction(99)}
+	}
+
+	var rBuf bytes.Buffer
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		buf := make([]byte, 4096)
+		for {
+			n, err := rRemote.Read(buf)
+			if n > 0 {
+				rBuf.Write(buf[:n])
+			}
+			if bytes.Contains(rBuf.Bytes(), []byte(".\r\n")) || err != nil {
+				break
+			}
+		}
+	}()
+
+	message := []byte("Subject: unknown\r\n\r\nBody\r\n.\r\n")
+	buf := make([]byte, len(message))
+	copy(buf, message)
+
+	_, _, isContinue := p.handleDataPhaseUpstream(buf, len(message))
+	wg.Wait()
+
+	if !isContinue {
+		t.Error("expected isContinue=true")
+	}
+	if !bytes.Contains(rBuf.Bytes(), []byte("Subject: unknown")) {
+		t.Errorf("expected message to be relayed on unknown action, got %q", rBuf.String())
+	}
+}
+
+func TestMediateOnDownstream_Non354ClearsDataCommandSent(t *testing.T) {
+	p := &Pipe{
+		afterCommHook: func(b Data, to Direction) {},
+		beforeRelayHook: func(data *BeforeRelayData) *FilterResult {
+			return &FilterResult{Action: FilterRelay}
+		},
+		dataCommandSent: true,
+		dataBuffer:      &bytes.Buffer{},
+	}
+
+	// Server responds with 503 instead of 354
+	resp := []byte("503 5.5.1 Bad sequence of commands\r\n")
+	buf := make([]byte, 1024)
+	copy(buf, resp)
+
+	_, _, _ = p.mediateOnDownstream(buf, len(resp))
+
+	if p.dataCommandSent {
+		t.Error("dataCommandSent should be cleared on non-354 response")
+	}
+	if p.dataBuffer != nil {
+		t.Error("dataBuffer should be cleared on non-354 response")
+	}
+	if p.inDataPhase {
+		t.Error("should not enter DATA phase on non-354 response")
+	}
+}
+
+func TestMediateOnDownstream_SuppressNextResponse(t *testing.T) {
+	p := &Pipe{
+		afterCommHook:        func(b Data, to Direction) {},
+		suppressNextResponse: true,
+	}
+
+	resp := []byte("250 2.0.0 Ok: queued\r\n")
+	buf := make([]byte, 1024)
+	copy(buf, resp)
+
+	_, _, isContinue := p.mediateOnDownstream(buf, len(resp))
+
+	if !isContinue {
+		t.Error("expected isContinue=true to suppress server response after overflow")
+	}
+	if p.suppressNextResponse {
+		t.Error("suppressNextResponse should be cleared after suppression")
+	}
+}
+
+func TestHandleDataPhaseUpstream_RejectSanitizesReply(t *testing.T) {
+	p, _, rRemote := newTestPipeWithConns(t)
+	p.inDataPhase = true
+	p.dataBuffer = &bytes.Buffer{}
+
+	// Hook returns reply with CRLF injection attempt
+	p.beforeRelayHook = func(data *BeforeRelayData) *FilterResult {
+		return &FilterResult{
+			Action: FilterReject,
+			Reply:  "550 bad\r\n250 fake ok",
+		}
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		buf := make([]byte, 4096)
+		rRemote.Read(buf)
+	}()
+
+	message := []byte("Subject: test\r\n\r\nBody\r\n.\r\n")
+	buf := make([]byte, len(message))
+	copy(buf, message)
+
+	p.handleDataPhaseUpstream(buf, len(message))
+	wg.Wait()
+
+	// CR/LF should be stripped
+	if p.filterRejectReply != "550 bad250 fake ok" {
+		t.Errorf("filterRejectReply = %q, want %q", p.filterRejectReply, "550 bad250 fake ok")
 	}
 }

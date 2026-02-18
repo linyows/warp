@@ -39,12 +39,13 @@ type Pipe struct {
 	afterConnHook func()
 
 	// DATA phase buffering for filter hooks
-	dataCommandSent   bool
-	inDataPhase       bool
-	dataBuffer        *bytes.Buffer
-	dataBufferSize    int
-	filterRejectReply string
-	senderIP          string
+	dataCommandSent      bool
+	inDataPhase          bool
+	dataBuffer           *bytes.Buffer
+	dataBufferSize       int
+	filterRejectReply    string
+	suppressNextResponse bool
+	senderIP             string
 
 	// Filter hook (nil if no FilterHook registered)
 	beforeRelayHook func(*BeforeRelayData) *FilterResult
@@ -200,6 +201,7 @@ func (p *Pipe) handleDataPhaseUpstream(b []byte, i int) ([]byte, int, bool) {
 		_, _ = p.rConn.Write(dataTerminator)
 		p.inDataPhase = false
 		p.dataBuffer = nil
+		p.suppressNextResponse = true
 		go p.afterCommHook([]byte("filter buffer overflow"), onPxy)
 		return b, i, true
 	}
@@ -229,16 +231,15 @@ func (p *Pipe) handleDataPhaseUpstream(b []byte, i int) ([]byte, int, bool) {
 		Message:  message,
 	})
 
+	// Fallback to relay if hook returns nil
+	if result == nil {
+		result = &FilterResult{Action: FilterRelay}
+	}
+
 	p.inDataPhase = false
 	p.dataBuffer = nil
 
 	switch result.Action {
-	case FilterRelay:
-		// Relay original message + terminator to server
-		_, _ = p.rConn.Write(message)
-		_, _ = p.rConn.Write(dataTerminator[2:]) // .\r\n
-		go p.afterCommHook([]byte("filter: relay"), onPxy)
-
 	case FilterAddHeader:
 		// Relay modified message + terminator to server
 		_, _ = p.rConn.Write(result.Message)
@@ -251,16 +252,48 @@ func (p *Pipe) handleDataPhaseUpstream(b []byte, i int) ([]byte, int, bool) {
 	case FilterReject:
 		// Send empty terminator to server, set reject reply for downstream
 		_, _ = p.rConn.Write(dataTerminator)
-		p.filterRejectReply = result.Reply
-		go p.afterCommHook([]byte(fmt.Sprintf("filter: reject (%s)", result.Reply)), onPxy)
+		p.filterRejectReply = sanitizeReply(result.Reply)
+		go p.afterCommHook([]byte(fmt.Sprintf("filter: reject (%s)", p.filterRejectReply)), onPxy)
+
+	default:
+		// FilterRelay or unknown action: relay original message
+		_, _ = p.rConn.Write(message)
+		_, _ = p.rConn.Write(dataTerminator[2:]) // .\r\n
+		go p.afterCommHook([]byte("filter: relay"), onPxy)
 	}
 
 	return b, i, true
 }
 
-// isActionCompletedResponse checks if the response indicates action completed (250).
-func (p *Pipe) isActionCompletedResponse(b []byte) bool {
-	return bytes.Contains(b, []byte(fmt.Sprint(codeActionCompleted)))
+// hasResponseCode checks if any line in b starts with the given 3-digit SMTP response code.
+// Matches "CODE " or "CODE-" (multi-line) at line start per RFC 5321.
+func (p *Pipe) hasResponseCode(b []byte, code int) bool {
+	codeStr := fmt.Sprint(code)
+	for _, line := range bytes.Split(b, []byte("\n")) {
+		line = bytes.TrimRight(line, "\r")
+		if len(line) < 3 {
+			continue
+		}
+		if string(line[:3]) != codeStr {
+			continue
+		}
+		// Exact 3-char line, or followed by space/hyphen (RFC 5321 reply format)
+		if len(line) == 3 || line[3] == ' ' || line[3] == '-' {
+			return true
+		}
+	}
+	return false
+}
+
+// sanitizeReply removes CR/LF characters from an SMTP reply to prevent response injection.
+// Returns a safe default if the reply is empty or invalid.
+func sanitizeReply(reply string) string {
+	reply = strings.ReplaceAll(reply, "\r", "")
+	reply = strings.ReplaceAll(reply, "\n", "")
+	if reply == "" {
+		return "550 5.7.0 Message rejected"
+	}
+	return reply
 }
 
 func (p *Pipe) mediateOnDownstream(b []byte, i int) ([]byte, int, bool) {
@@ -286,14 +319,25 @@ func (p *Pipe) mediateOnDownstream(b []byte, i int) ([]byte, int, bool) {
 
 	// FilterHook: detect 354 response to enter DATA phase
 	if p.beforeRelayHook != nil && p.dataCommandSent {
-		if bytes.Contains(data, []byte(fmt.Sprint(codeStartingMailInput))) {
+		if p.hasResponseCode(data, codeStartingMailInput) {
 			p.inDataPhase = true
 			p.dataCommandSent = false
+		} else {
+			// Non-354 response (e.g. 503, 451): clear DATA command state
+			p.dataCommandSent = false
+			p.dataBuffer = nil
 		}
 	}
 
+	// FilterHook: suppress server's response after buffer overflow
+	if p.suppressNextResponse && p.hasResponseCode(data, codeActionCompleted) {
+		p.suppressNextResponse = false
+		go p.afterCommHook([]byte("filter: suppressed server response after overflow"), onPxy)
+		return b, i, true
+	}
+
 	// FilterHook: replace server's 250 OK with reject reply
-	if p.filterRejectReply != "" && p.isActionCompletedResponse(data) {
+	if p.filterRejectReply != "" && p.hasResponseCode(data, codeActionCompleted) {
 		reply := p.filterRejectReply
 		p.filterRejectReply = ""
 		_, _ = p.sConn.Write([]byte(reply + crlf))
