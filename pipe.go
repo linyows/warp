@@ -196,8 +196,8 @@ func (p *Pipe) handleDataPhaseUpstream(b []byte, i int) ([]byte, int, bool) {
 	// Buffer size check
 	if p.dataBufferSize > 0 && p.dataBuffer.Len()+len(data) > p.dataBufferSize {
 		// Buffer overflow: send error to client, empty terminator to server
-		p.sConn.Write([]byte("552 5.3.4 Message too big for filter" + crlf))
-		p.rConn.Write(dataTerminator)
+		_, _ = p.sConn.Write([]byte("552 5.3.4 Message too big for filter" + crlf))
+		_, _ = p.rConn.Write(dataTerminator)
 		p.inDataPhase = false
 		p.dataBuffer = nil
 		go p.afterCommHook([]byte("filter buffer overflow"), onPxy)
@@ -235,22 +235,22 @@ func (p *Pipe) handleDataPhaseUpstream(b []byte, i int) ([]byte, int, bool) {
 	switch result.Action {
 	case FilterRelay:
 		// Relay original message + terminator to server
-		p.rConn.Write(message)
-		p.rConn.Write(dataTerminator[2:]) // .\r\n
+		_, _ = p.rConn.Write(message)
+		_, _ = p.rConn.Write(dataTerminator[2:]) // .\r\n
 		go p.afterCommHook([]byte("filter: relay"), onPxy)
 
 	case FilterAddHeader:
 		// Relay modified message + terminator to server
-		p.rConn.Write(result.Message)
+		_, _ = p.rConn.Write(result.Message)
 		if !bytes.HasSuffix(result.Message, []byte(crlf)) {
-			p.rConn.Write([]byte(crlf))
+			_, _ = p.rConn.Write([]byte(crlf))
 		}
-		p.rConn.Write(dataTerminator[2:]) // .\r\n
+		_, _ = p.rConn.Write(dataTerminator[2:]) // .\r\n
 		go p.afterCommHook([]byte("filter: add header"), onPxy)
 
 	case FilterReject:
 		// Send empty terminator to server, set reject reply for downstream
-		p.rConn.Write(dataTerminator)
+		_, _ = p.rConn.Write(dataTerminator)
 		p.filterRejectReply = result.Reply
 		go p.afterCommHook([]byte(fmt.Sprintf("filter: reject (%s)", result.Reply)), onPxy)
 	}
@@ -296,7 +296,7 @@ func (p *Pipe) mediateOnDownstream(b []byte, i int) ([]byte, int, bool) {
 	if p.filterRejectReply != "" && p.isActionCompletedResponse(data) {
 		reply := p.filterRejectReply
 		p.filterRejectReply = ""
-		p.sConn.Write([]byte(reply + crlf))
+		_, _ = p.sConn.Write([]byte(reply + crlf))
 		go p.afterCommHook([]byte(reply), pxyToSrc)
 		return b, i, true // Suppress server's 250 OK
 	}

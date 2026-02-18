@@ -328,10 +328,10 @@ func newTestPipeWithConns(t *testing.T) (*Pipe, net.Conn, net.Conn) {
 		afterConnHook: func() {},
 	}
 	t.Cleanup(func() {
-		sClient.Close()
-		sServer.Close()
-		rClient.Close()
-		rServer.Close()
+		_ = sClient.Close()
+		_ = sServer.Close()
+		_ = rClient.Close()
+		_ = rServer.Close()
 	})
 	return p, sClient, rServer
 }
@@ -673,7 +673,7 @@ func TestMediateOnUpstream_DelegatesInDataPhase(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		io.ReadAll(rRemote)
+		_, _ = io.ReadAll(rRemote)
 	}()
 
 	message := []byte("Subject: test\r\n\r\nBody\r\n.\r\n")
@@ -682,7 +682,7 @@ func TestMediateOnUpstream_DelegatesInDataPhase(t *testing.T) {
 
 	_, _, isContinue := p.mediateOnUpstream(buf, len(message))
 	// Close to unblock reader
-	p.rConn.Close()
+	_ = p.rConn.Close()
 	wg.Wait()
 
 	if !isContinue {
