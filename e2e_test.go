@@ -56,6 +56,22 @@ func (h *testHook) getConnCalls() []*AfterConnData {
 	return result
 }
 
+func (h *testHook) findConnCall(mailFrom string, timeout time.Duration) *AfterConnData {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		h.mu.Lock()
+		for _, c := range h.connCalls {
+			if string(c.MailFrom) == mailFrom {
+				h.mu.Unlock()
+				return c
+			}
+		}
+		h.mu.Unlock()
+		time.Sleep(50 * time.Millisecond)
+	}
+	return nil
+}
+
 func (h *testHook) getCommCalls() []*AfterCommData {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -139,7 +155,11 @@ func (env *testEnv) sendEmail(t *testing.T, from, to, subject, body string) {
 	if err != nil {
 		t.Fatalf("smtp.Dial error: %v", err)
 	}
-	defer s.Quit()
+	defer func() {
+		if err := s.Quit(); err != nil {
+			t.Logf("QUIT error: %v", err)
+		}
+	}()
 
 	if err := s.Mail(from); err != nil {
 		t.Fatalf("MAIL FROM error: %v", err)
@@ -205,18 +225,17 @@ func TestE2E(t *testing.T) {
 	})
 
 	t.Run("MetadataExtraction", func(t *testing.T) {
-		if !env.hook.waitForConnCalls(1, 5*time.Second) {
-			t.Fatal("timed out waiting for AfterConn hook call")
+		// Find the conn call matching the email we sent (probe connections have "unknown")
+		emailConn := env.hook.findConnCall("sender@example.test", 5*time.Second)
+		if emailConn == nil {
+			t.Fatal("timed out waiting for AfterConn hook call with expected MailFrom")
 		}
 
-		conns := env.hook.getConnCalls()
-		last := conns[len(conns)-1]
-
-		if string(last.MailFrom) != "sender@example.test" {
-			t.Errorf("AfterConn MailFrom = %q, want %q", last.MailFrom, "sender@example.test")
+		if string(emailConn.MailFrom) != "sender@example.test" {
+			t.Errorf("AfterConn MailFrom = %q, want %q", emailConn.MailFrom, "sender@example.test")
 		}
-		if string(last.MailTo) != "receiver@example.local" {
-			t.Errorf("AfterConn MailTo = %q, want %q", last.MailTo, "receiver@example.local")
+		if string(emailConn.MailTo) != "receiver@example.local" {
+			t.Errorf("AfterConn MailTo = %q, want %q", emailConn.MailTo, "receiver@example.local")
 		}
 	})
 
