@@ -2,6 +2,7 @@ package warp
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -13,6 +14,14 @@ import (
 	"strings"
 	"time"
 )
+
+// ReceivedMessage represents a message received by the test SMTP server.
+type ReceivedMessage struct {
+	Helo     string
+	MailFrom string
+	RcptTo   []string
+	Data     []byte
+}
 
 const (
 	outgoing  Direction = "->"
@@ -84,10 +93,11 @@ func (c *SMTPClient) SendEmail() error {
 }
 
 type SMTPServer struct {
-	IP       string
-	Port     int
-	Hostname string
-	log      *log.Logger
+	IP        string
+	Port      int
+	Hostname  string
+	OnMessage func(ReceivedMessage)
+	log       *log.Logger
 }
 
 func (s *SMTPServer) Serve() error {
@@ -109,7 +119,7 @@ func (s *SMTPServer) Serve() error {
 			s.log.Println("Accept error:", err)
 			continue
 		}
-		c := &SMTPConn{hostname: s.Hostname, id: GenID().String(), log: s.log}
+		c := &SMTPConn{hostname: s.Hostname, id: GenID().String(), log: s.log, onMessage: s.OnMessage}
 		go c.handle(conn)
 	}
 }
@@ -121,6 +131,12 @@ type SMTPConn struct {
 	hostname string
 	data     bool
 	log      *log.Logger
+
+	helo      string
+	mailFrom  string
+	rcptTo    []string
+	dataBody  bytes.Buffer
+	onMessage func(ReceivedMessage)
 }
 
 func (c *SMTPConn) handle(conn net.Conn) {
@@ -165,19 +181,24 @@ func (c *SMTPConn) handle(conn net.Conn) {
 
 			switch first {
 			case "EHLO":
+				c.helo = parts[1]
 				c.writeStringWithLog(fmt.Sprintf("250-%s\r\n250-PIPELINING\r\n250-SIZE 10240000\r\n250-STARTTLS\r\n250 8BITMIME", c.hostname))
 			case "HELO":
+				c.helo = parts[1]
 				c.writeStringWithLog(fmt.Sprintf("250 Hello %s", parts[1]))
 			case "MAIL":
 				if strings.Contains(second, "FROM:") {
+					c.mailFrom = extractAddress(v)
 					c.writeStringWithLog("250 2.1.0 Ok")
 				}
 			case "RCPT":
 				if strings.Contains(second, "TO:") {
+					c.rcptTo = append(c.rcptTo, extractAddress(v))
 					c.writeStringWithLog("250 2.1.5 Ok")
 				}
 			case "DATA":
 				c.data = true
+				c.dataBody.Reset()
 				c.writeStringWithLog("354 End data with <CR><LF>.<CR><LF>")
 			case "QUIT":
 				c.writeStringWithLog("221 2.0.0 Bye")
@@ -185,8 +206,22 @@ func (c *SMTPConn) handle(conn net.Conn) {
 				return
 			case ".":
 				c.data = false
+				if c.onMessage != nil {
+					c.onMessage(ReceivedMessage{
+						Helo:     c.helo,
+						MailFrom: c.mailFrom,
+						RcptTo:   append([]string{}, c.rcptTo...),
+						Data:     append([]byte{}, c.dataBody.Bytes()...),
+					})
+				}
+				c.mailFrom = ""
+				c.rcptTo = nil
+				c.dataBody.Reset()
 				c.writeStringWithLog("250 2.0.0 Ok: queued")
 			case "RSET":
+				c.mailFrom = ""
+				c.rcptTo = nil
+				c.dataBody.Reset()
 				c.writeStringWithLog("250 2.0.0 Ok")
 			case "NOOP":
 				c.writeStringWithLog("250 2.0.0 Ok")
@@ -197,7 +232,9 @@ func (c *SMTPConn) handle(conn net.Conn) {
 				c.writer.Flush()
 				c.startTLS(conn)
 			default:
-				if !c.data {
+				if c.data {
+					c.dataBody.WriteString(v + "\n")
+				} else {
 					c.writeStringWithLog("500 Command not recognized")
 				}
 			}
@@ -205,6 +242,15 @@ func (c *SMTPConn) handle(conn net.Conn) {
 
 		c.writer.Flush()
 	}
+}
+
+func extractAddress(s string) string {
+	start := strings.Index(s, "<")
+	end := strings.Index(s, ">")
+	if start >= 0 && end > start {
+		return s[start+1 : end]
+	}
+	return ""
 }
 
 func (c *SMTPConn) writeStringWithLog(str string) {

@@ -18,8 +18,11 @@ run:
 test:
 	go test -v -short ./...
 
+e2e: key
+	go test -v -run TestE2E
+
 integration: key
-	go test -v -run TestIntegration
+	go test -v -run 'TestIntegration|TestE2E'
 
 test-all:
 	go test $(TEST_OPTIONS) -failfast -race -coverpkg=./... -covermode=atomic -coverprofile=coverage.txt $(SOURCE_FILES) -run $(TEST_PATTERN) -timeout=5m
@@ -47,4 +50,4 @@ clean:
 	rm -rf plugins/*.so
 	rm -rf dist/*
 
-.PHONY: plugin integration
+.PHONY: plugin integration e2e
