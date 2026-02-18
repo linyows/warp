@@ -229,7 +229,7 @@ func (p *Pipe) setSenderServerName(b []byte) {
 		upper := bytes.ToUpper(b)
 		idx := bytes.Index(upper, []byte("HELO "))
 		if idx >= 0 {
-			p.sServerName = bytes.TrimSpace(b[idx+5:])
+			p.sServerName = append([]byte{}, bytes.TrimSpace(b[idx+5:])...)
 		}
 	}
 	if containsFold(b, []byte("EHLO ")) {
@@ -237,7 +237,7 @@ func (p *Pipe) setSenderServerName(b []byte) {
 		upper := bytes.ToUpper(b)
 		idx := bytes.Index(upper, []byte("EHLO "))
 		if idx >= 0 {
-			p.sServerName = bytes.TrimSpace(b[idx+5:])
+			p.sServerName = append([]byte{}, bytes.TrimSpace(b[idx+5:])...)
 		}
 	}
 }
@@ -250,7 +250,7 @@ func (p *Pipe) setSenderMailAddress(b []byte) {
 		start := bytes.IndexByte(match, '<')
 		end := bytes.IndexByte(match, '>')
 		if start >= 0 && end > start {
-			p.sMailAddr = match[start+1 : end]
+			p.sMailAddr = append([]byte{}, match[start+1:end]...)
 
 			// Check RFC 5321 compliance
 			if !isRFCCompliant(match, mailFromRegexStrict) {
@@ -268,10 +268,10 @@ func (p *Pipe) setReceiverMailAddressAndServerName(b []byte) {
 		start := bytes.IndexByte(match, '<')
 		end := bytes.IndexByte(match, '>')
 		if start >= 0 && end > start {
-			p.rMailAddr = match[start+1 : end]
+			p.rMailAddr = append([]byte{}, match[start+1:end]...)
 			parts := bytes.Split(p.rMailAddr, []byte("@"))
 			if len(parts) == 2 {
-				p.rServerName = parts[1]
+				p.rServerName = append([]byte{}, parts[1]...)
 			}
 
 			// Check RFC 5321 compliance
