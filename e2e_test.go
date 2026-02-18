@@ -80,6 +80,21 @@ func (h *testHook) getCommCalls() []*AfterCommData {
 	return result
 }
 
+// testFilterHook implements FilterHook interface for E2E tests.
+type testFilterHook struct {
+	testHook
+	filterFn func(*BeforeRelayData) *FilterResult
+}
+
+func (h *testFilterHook) Name() string { return "test-filter" }
+
+func (h *testFilterHook) BeforeRelay(data *BeforeRelayData) *FilterResult {
+	if h.filterFn != nil {
+		return h.filterFn(data)
+	}
+	return &FilterResult{Action: FilterRelay}
+}
+
 // testEnv encapsulates the warp server, test SMTP server, and hook for E2E tests.
 type testEnv struct {
 	ip       string
@@ -309,6 +324,188 @@ func TestE2E(t *testing.T) {
 
 		if !env.hook.waitForConnCalls(connCountBefore+2, 5*time.Second) {
 			t.Error("timed out waiting for AfterConn hook calls for multiple emails")
+		}
+	})
+}
+
+// filterTestEnv wraps testEnv with a filter hook for filter E2E tests.
+type filterTestEnv struct {
+	*testEnv
+	filterHook *testFilterHook
+}
+
+func setupFilterTestEnv(t *testing.T, filterFn func(*BeforeRelayData) *FilterResult) *filterTestEnv {
+	t.Helper()
+
+	warpPort, smtpPort := allocPorts()
+	fh := &testFilterHook{filterFn: filterFn}
+	env := &filterTestEnv{
+		testEnv: &testEnv{
+			ip:       "127.0.0.1",
+			warpPort: warpPort,
+			smtpPort: smtpPort,
+			hostname: "example.local",
+			hook:     &fh.testHook,
+			messages: make(chan ReceivedMessage, 10),
+		},
+		filterHook: fh,
+	}
+
+	go func() {
+		specifiedDstIP = env.ip
+		specifiedDstPort = env.smtpPort
+		w := &Server{
+			Addr:    env.ip,
+			Port:    env.warpPort,
+			Verbose: true,
+			Hooks:   []Hook{env.filterHook},
+			log:     log.New(&env.warpLog, "", log.Ldate|log.Ltime|log.Lmicroseconds),
+		}
+		if err := w.Start(); err != nil {
+			t.Errorf("warp raised error: %s", err)
+		}
+	}()
+
+	go func() {
+		s := &SMTPServer{
+			IP:       env.ip,
+			Port:     env.smtpPort,
+			Hostname: env.hostname,
+			log:      log.New(&env.smtpLog, "", log.Ldate|log.Ltime|log.Lmicroseconds),
+			OnMessage: func(msg ReceivedMessage) {
+				env.messages <- msg
+			},
+		}
+		if err := s.Serve(); err != nil {
+			t.Errorf("smtp server raised error: %s", err)
+		}
+	}()
+
+	WaitForServerListen(env.ip, env.warpPort)
+	WaitForServerListen(env.ip, env.smtpPort)
+
+	return env
+}
+
+// sendEmailExpectError sends an email and returns an error if the DATA close fails (e.g. reject).
+func (env *testEnv) sendEmailExpectError(t *testing.T, from, to, subject, body string) error {
+	t.Helper()
+
+	s, err := smtp.Dial(fmt.Sprintf("%s:%d", env.ip, env.warpPort))
+	if err != nil {
+		t.Fatalf("smtp.Dial error: %v", err)
+	}
+	defer func() {
+		if err := s.Quit(); err != nil {
+			t.Logf("QUIT error: %v", err)
+		}
+	}()
+
+	if err := s.Mail(from); err != nil {
+		t.Fatalf("MAIL FROM error: %v", err)
+	}
+	if err := s.Rcpt(to); err != nil {
+		t.Fatalf("RCPT TO error: %v", err)
+	}
+	wc, err := s.Data()
+	if err != nil {
+		t.Fatalf("DATA error: %v", err)
+	}
+
+	msg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\n\r\n%s", from, to, subject, body)
+	if _, err := wc.Write([]byte(msg)); err != nil {
+		t.Fatalf("DATA write error: %v", err)
+	}
+	return wc.Close()
+}
+
+func TestE2EFilter(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	t.Run("Relay", func(t *testing.T) {
+		env := setupFilterTestEnv(t, func(data *BeforeRelayData) *FilterResult {
+			return &FilterResult{Action: FilterRelay}
+		})
+
+		env.sendEmail(t, "relay@example.test", "dest@example.local", "Relay Test", "This should be relayed.")
+		msg := env.waitForMessage(t, 5*time.Second)
+
+		if msg.MailFrom != "relay@example.test" {
+			t.Errorf("MailFrom = %q, want %q", msg.MailFrom, "relay@example.test")
+		}
+		if !strings.Contains(string(msg.Data), "This should be relayed.") {
+			t.Error("message body not found in relayed message")
+		}
+	})
+
+	t.Run("Reject", func(t *testing.T) {
+		env := setupFilterTestEnv(t, func(data *BeforeRelayData) *FilterResult {
+			return &FilterResult{
+				Action: FilterReject,
+				Reply:  "550 5.7.1 Spam detected",
+			}
+		})
+
+		err := env.sendEmailExpectError(t, "spammer@example.test", "dest@example.local", "Spam", "Buy now!")
+		if err == nil {
+			t.Fatal("expected error from rejected email, got nil")
+		}
+		if !strings.Contains(err.Error(), "550") {
+			t.Errorf("expected 550 error, got: %v", err)
+		}
+	})
+
+	t.Run("AddHeader", func(t *testing.T) {
+		env := setupFilterTestEnv(t, func(data *BeforeRelayData) *FilterResult {
+			modified := append([]byte("X-Spam-Score: 0.5\r\n"), data.Message...)
+			return &FilterResult{
+				Action:  FilterAddHeader,
+				Message: modified,
+			}
+		})
+
+		env.sendEmail(t, "header@example.test", "dest@example.local", "Header Test", "Check the header.")
+		msg := env.waitForMessage(t, 5*time.Second)
+
+		data := string(msg.Data)
+		if !strings.Contains(data, "X-Spam-Score: 0.5") {
+			t.Errorf("added header not found in message:\n%s", data[:min(len(data), 500)])
+		}
+		if !strings.Contains(data, "Check the header.") {
+			t.Error("original body not found in modified message")
+		}
+	})
+
+	t.Run("WithoutFilterHook", func(t *testing.T) {
+		env := setupTestEnv(t)
+
+		env.sendEmail(t, "nofilter@example.test", "dest@example.local", "No Filter", "Normal relay.")
+		msg := env.waitForMessage(t, 5*time.Second)
+
+		if msg.MailFrom != "nofilter@example.test" {
+			t.Errorf("MailFrom = %q, want %q", msg.MailFrom, "nofilter@example.test")
+		}
+		if !strings.Contains(string(msg.Data), "Normal relay.") {
+			t.Error("message body not found")
+		}
+	})
+
+	t.Run("MessageIntegrity", func(t *testing.T) {
+		longBody := strings.Repeat("The quick brown fox jumps over the lazy dog. ", 100)
+		env := setupFilterTestEnv(t, func(data *BeforeRelayData) *FilterResult {
+			return &FilterResult{Action: FilterRelay}
+		})
+
+		env.sendEmail(t, "integrity@example.test", "dest@example.local", "Integrity", longBody)
+		msg := env.waitForMessage(t, 5*time.Second)
+
+		if !strings.Contains(string(msg.Data), "Subject: Integrity") {
+			t.Error("Subject header not found")
+		}
+		if !strings.Contains(string(msg.Data), "The quick brown fox") {
+			t.Error("body content not preserved through filter")
 		}
 	})
 }

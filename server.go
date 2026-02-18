@@ -87,6 +87,12 @@ func (s *Server) HandleConnection(conn net.Conn) {
 		s.log.Printf("%s %s connected from %s", uuid, onPxy, conn.RemoteAddr())
 	}
 
+	// Extract sender IP from connection
+	senderIP := ""
+	if host, _, err := net.SplitHostPort(conn.RemoteAddr().String()); err == nil {
+		senderIP = host
+	}
+
 	raddr, err := s.OriginalAddrDst(conn)
 	if err != nil {
 		s.log.Printf("%s %s original addr error: %s(%#v)", uuid, onPxy, err.Error(), err)
@@ -121,12 +127,28 @@ func (s *Server) HandleConnection(conn net.Conn) {
 		return
 	}
 
+	// Detect FilterHook in hooks list
+	var filterHook FilterHook
+	for _, hook := range s.Hooks {
+		if fh, ok := hook.(FilterHook); ok {
+			filterHook = fh
+			break
+		}
+	}
+
 	p := &Pipe{
 		id:         uuid,
 		sConn:      conn,
 		rConn:      dstConn,
 		rAddr:      raddr,
 		bufferSize: s.MessageSizeLimit,
+		senderIP:   senderIP,
+	}
+
+	// Inject filter hook if available
+	if filterHook != nil {
+		p.beforeRelayHook = filterHook.BeforeRelay
+		p.dataBufferSize = s.MessageSizeLimit
 	}
 	p.afterCommHook = func(b Data, to Direction) {
 		now := time.Now()

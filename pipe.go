@@ -37,6 +37,17 @@ type Pipe struct {
 
 	afterCommHook func(Data, Direction)
 	afterConnHook func()
+
+	// DATA phase buffering for filter hooks
+	dataCommandSent   bool
+	inDataPhase       bool
+	dataBuffer        *bytes.Buffer
+	dataBufferSize    int
+	filterRejectReply string
+	senderIP          string
+
+	// Filter hook (nil if no FilterHook registered)
+	beforeRelayHook func(*BeforeRelayData) *FilterResult
 }
 
 type Mediator func([]byte, int) ([]byte, int, bool)
@@ -130,6 +141,19 @@ func (p *Pipe) mediateOnUpstream(b []byte, i int) ([]byte, int, bool) {
 		p.setReceiverMailAddressAndServerName(data)
 	}
 
+	// FilterHook: DATA phase buffering
+	if p.beforeRelayHook != nil {
+		if p.inDataPhase {
+			return p.handleDataPhaseUpstream(b, i)
+		}
+		if p.isDataCommand(data) {
+			p.dataCommandSent = true
+			p.dataBuffer = &bytes.Buffer{}
+			go p.afterCommHook(data, srcToDst)
+			return b, i, false // Relay DATA command to server
+		}
+	}
+
 	if !p.tls && p.readytls {
 		p.locked = true
 		er := p.starttls()
@@ -153,6 +177,92 @@ func (p *Pipe) mediateOnUpstream(b []byte, i int) ([]byte, int, bool) {
 	return b, i, false
 }
 
+// isDataCommand checks if the given data is a DATA command.
+func (p *Pipe) isDataCommand(data []byte) bool {
+	trimmed := bytes.TrimSpace(data)
+	return len(trimmed) == 4 && (trimmed[0] == 'D' || trimmed[0] == 'd') &&
+		(trimmed[1] == 'A' || trimmed[1] == 'a') &&
+		(trimmed[2] == 'T' || trimmed[2] == 't') &&
+		(trimmed[3] == 'A' || trimmed[3] == 'a')
+}
+
+// dataTerminator is the SMTP end-of-data marker.
+var dataTerminator = []byte("\r\n.\r\n")
+
+// handleDataPhaseUpstream buffers client data during DATA phase and invokes filter hook.
+func (p *Pipe) handleDataPhaseUpstream(b []byte, i int) ([]byte, int, bool) {
+	data := b[0:i]
+
+	// Buffer size check
+	if p.dataBufferSize > 0 && p.dataBuffer.Len()+len(data) > p.dataBufferSize {
+		// Buffer overflow: send error to client, empty terminator to server
+		p.sConn.Write([]byte("552 5.3.4 Message too big for filter" + crlf))
+		p.rConn.Write(dataTerminator)
+		p.inDataPhase = false
+		p.dataBuffer = nil
+		go p.afterCommHook([]byte("filter buffer overflow"), onPxy)
+		return b, i, true
+	}
+
+	p.dataBuffer.Write(data)
+
+	// Check for end-of-data marker in accumulated buffer
+	if !bytes.Contains(p.dataBuffer.Bytes(), dataTerminator) {
+		// Not yet complete, suppress relay to server
+		return b, i, true
+	}
+
+	// End-of-data detected: extract message (without terminator)
+	fullData := p.dataBuffer.Bytes()
+	termIdx := bytes.Index(fullData, dataTerminator)
+	message := fullData[:termIdx+2] // Include trailing \r\n but not .\r\n
+
+	go p.afterCommHook(p.removeMailBody(message), srcToDst)
+
+	// Invoke filter hook
+	result := p.beforeRelayHook(&BeforeRelayData{
+		ConnID:   p.id,
+		MailFrom: p.sMailAddr,
+		MailTo:   p.rMailAddr,
+		SenderIP: p.senderIP,
+		Helo:     p.sServerName,
+		Message:  message,
+	})
+
+	p.inDataPhase = false
+	p.dataBuffer = nil
+
+	switch result.Action {
+	case FilterRelay:
+		// Relay original message + terminator to server
+		p.rConn.Write(message)
+		p.rConn.Write(dataTerminator[2:]) // .\r\n
+		go p.afterCommHook([]byte("filter: relay"), onPxy)
+
+	case FilterAddHeader:
+		// Relay modified message + terminator to server
+		p.rConn.Write(result.Message)
+		if !bytes.HasSuffix(result.Message, []byte(crlf)) {
+			p.rConn.Write([]byte(crlf))
+		}
+		p.rConn.Write(dataTerminator[2:]) // .\r\n
+		go p.afterCommHook([]byte("filter: add header"), onPxy)
+
+	case FilterReject:
+		// Send empty terminator to server, set reject reply for downstream
+		p.rConn.Write(dataTerminator)
+		p.filterRejectReply = result.Reply
+		go p.afterCommHook([]byte(fmt.Sprintf("filter: reject (%s)", result.Reply)), onPxy)
+	}
+
+	return b, i, true
+}
+
+// isActionCompletedResponse checks if the response indicates action completed (250).
+func (p *Pipe) isActionCompletedResponse(b []byte) bool {
+	return bytes.Contains(b, []byte(fmt.Sprint(codeActionCompleted)))
+}
+
 func (p *Pipe) mediateOnDownstream(b []byte, i int) ([]byte, int, bool) {
 	data := b[0:i]
 
@@ -172,6 +282,23 @@ func (p *Pipe) mediateOnDownstream(b []byte, i int) ([]byte, int, bool) {
 	if p.isWaitedStarttlsRes {
 		p.isWaitedStarttlsRes = false
 		return b, i, true
+	}
+
+	// FilterHook: detect 354 response to enter DATA phase
+	if p.beforeRelayHook != nil && p.dataCommandSent {
+		if bytes.Contains(data, []byte(fmt.Sprint(codeStartingMailInput))) {
+			p.inDataPhase = true
+			p.dataCommandSent = false
+		}
+	}
+
+	// FilterHook: replace server's 250 OK with reject reply
+	if p.filterRejectReply != "" && p.isActionCompletedResponse(data) {
+		reply := p.filterRejectReply
+		p.filterRejectReply = ""
+		p.sConn.Write([]byte(reply + crlf))
+		go p.afterCommHook([]byte(reply), pxyToSrc)
+		return b, i, true // Suppress server's 250 OK
 	}
 
 	// time before email input
