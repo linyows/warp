@@ -489,7 +489,10 @@ func (p *Pipe) copy(dr Flow, fn Mediator) (written int64, err error) {
 
 	for {
 		var isContinue bool
-		if p.locked {
+		// Only block upstream while pipe is locked for TLS negotiation.
+		// Downstream must continue reading to receive the server's "220 Ready"
+		// response and complete the TLS handshake via connectTLS().
+		if p.locked && dr == upstream {
 			continue
 		}
 
