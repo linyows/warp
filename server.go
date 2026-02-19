@@ -59,7 +59,7 @@ func (s *Server) Start() error {
 	if err != nil {
 		return err
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	s.log.Printf("warp listens to %s:%d", s.Addr, s.Port)
 
 	for {
@@ -73,7 +73,7 @@ func (s *Server) Start() error {
 			s.log.Printf("failed to extract connection IP: %s(%#v)", err.Error(), err)
 		}
 		if s.Addr == remoteAddr && strconv.Itoa(s.Port) == remotePort {
-			conn.Close()
+			_ = conn.Close()
 			s.log.Printf("closed connection due to same ip(looping requests to warp?): %s", conn.RemoteAddr())
 			continue
 		}
@@ -85,6 +85,12 @@ func (s *Server) HandleConnection(conn net.Conn) {
 	uuid := GenID().String()
 	if s.Verbose {
 		s.log.Printf("%s %s connected from %s", uuid, onPxy, conn.RemoteAddr())
+	}
+
+	// Extract sender IP from connection
+	senderIP := ""
+	if host, _, err := net.SplitHostPort(conn.RemoteAddr().String()); err == nil {
+		senderIP = host
 	}
 
 	raddr, err := s.OriginalAddrDst(conn)
@@ -121,12 +127,28 @@ func (s *Server) HandleConnection(conn net.Conn) {
 		return
 	}
 
+	// Detect FilterHook in hooks list
+	var filterHook FilterHook
+	for _, hook := range s.Hooks {
+		if fh, ok := hook.(FilterHook); ok {
+			filterHook = fh
+			break
+		}
+	}
+
 	p := &Pipe{
 		id:         uuid,
 		sConn:      conn,
 		rConn:      dstConn,
 		rAddr:      raddr,
 		bufferSize: s.MessageSizeLimit,
+		senderIP:   senderIP,
+	}
+
+	// Inject filter hook if available
+	if filterHook != nil {
+		p.beforeRelayHook = filterHook.BeforeRelay
+		p.dataBufferSize = s.MessageSizeLimit
 	}
 	p.afterCommHook = func(b Data, to Direction) {
 		now := time.Now()
@@ -189,7 +211,7 @@ func (s *Server) OriginalAddrDst(conn net.Conn) (*net.TCPAddr, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	fd := f.Fd()
 
 	addr, err := syscall.GetsockoptIPv6Mreq(int(fd), syscall.IPPROTO_IP, SO_ORIGINAL_DST)

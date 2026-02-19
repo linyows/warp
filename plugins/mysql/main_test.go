@@ -62,7 +62,7 @@ func TestMysqlAfterComm(t *testing.T) {
 	if err != nil {
 		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ti := time.Date(2023, time.August, 16, 14, 48, 0, 0, time.UTC)
 
@@ -90,7 +90,7 @@ func TestMysqlAfterConn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ti := time.Date(2023, time.August, 16, 14, 48, 0, 0, time.UTC)
 

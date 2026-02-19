@@ -37,6 +37,17 @@ type Pipe struct {
 
 	afterCommHook func(Data, Direction)
 	afterConnHook func()
+
+	// DATA phase buffering for filter hooks
+	inDataPhase        bool
+	dataBuffer         *bytes.Buffer
+	dataBufferSize     int
+	discardingData     bool     // discard remaining client data after buffer overflow
+	pendingRelayMessage []byte  // buffered message waiting for server 354 after filter approval
+	senderIP           string
+
+	// Filter hook (nil if no FilterHook registered)
+	beforeRelayHook func(*BeforeRelayData) *FilterResult
 }
 
 type Mediator func([]byte, int) ([]byte, int, bool)
@@ -130,6 +141,23 @@ func (p *Pipe) mediateOnUpstream(b []byte, i int) ([]byte, int, bool) {
 		p.setReceiverMailAddressAndServerName(data)
 	}
 
+	// FilterHook: DATA phase buffering
+	if p.beforeRelayHook != nil {
+		if p.inDataPhase {
+			return p.handleDataPhaseUpstream(b, i)
+		}
+		if p.isDataCommand(data) {
+			// Don't relay DATA to server; send fake 354 to client
+			_, _ = p.sConn.Write([]byte("354 Start mail input" + crlf))
+			p.inDataPhase = true
+			p.dataBuffer = &bytes.Buffer{}
+			p.timeAtDataStarting = time.Now()
+			go p.afterCommHook(data, srcToPxy)
+			go p.afterCommHook([]byte("354 Start mail input"), pxyToSrc)
+			return b, i, true // Suppress relay to server
+		}
+	}
+
 	if !p.tls && p.readytls {
 		p.locked = true
 		er := p.starttls()
@@ -153,6 +181,133 @@ func (p *Pipe) mediateOnUpstream(b []byte, i int) ([]byte, int, bool) {
 	return b, i, false
 }
 
+// isDataCommand checks if the given data is a DATA command.
+func (p *Pipe) isDataCommand(data []byte) bool {
+	trimmed := bytes.TrimSpace(data)
+	return len(trimmed) == 4 && (trimmed[0] == 'D' || trimmed[0] == 'd') &&
+		(trimmed[1] == 'A' || trimmed[1] == 'a') &&
+		(trimmed[2] == 'T' || trimmed[2] == 't') &&
+		(trimmed[3] == 'A' || trimmed[3] == 'a')
+}
+
+// dataTerminator is the SMTP end-of-data marker.
+var dataTerminator = []byte("\r\n.\r\n")
+
+// handleDataPhaseUpstream buffers client data during DATA phase and invokes filter hook.
+func (p *Pipe) handleDataPhaseUpstream(b []byte, i int) ([]byte, int, bool) {
+	data := b[0:i]
+
+	// Discard mode: consume remaining client data after buffer overflow until terminator
+	if p.discardingData {
+		if bytes.Contains(data, dataTerminator) {
+			p.inDataPhase = false
+			p.discardingData = false
+		}
+		return b, i, true
+	}
+
+	// Buffer size check
+	if p.dataBufferSize > 0 && p.dataBuffer.Len()+len(data) > p.dataBufferSize {
+		// Buffer overflow: send error to client, no server interaction
+		_, _ = p.sConn.Write([]byte("552 5.3.4 Message too big for filter" + crlf))
+		p.dataBuffer = nil
+		p.discardingData = true
+		go p.afterCommHook([]byte("filter buffer overflow"), onPxy)
+		// Check if terminator is in current chunk
+		if bytes.Contains(data, dataTerminator) {
+			p.inDataPhase = false
+			p.discardingData = false
+		}
+		return b, i, true
+	}
+
+	p.dataBuffer.Write(data)
+
+	// Check for end-of-data marker in accumulated buffer
+	if !bytes.Contains(p.dataBuffer.Bytes(), dataTerminator) {
+		// Not yet complete, suppress relay to server
+		return b, i, true
+	}
+
+	// End-of-data detected: extract message (without terminator)
+	fullData := p.dataBuffer.Bytes()
+	termIdx := bytes.Index(fullData, dataTerminator)
+	message := fullData[:termIdx+2] // Include trailing \r\n but not .\r\n
+
+	go p.afterCommHook(p.removeMailBody(message), srcToDst)
+
+	// Invoke filter hook
+	result := p.beforeRelayHook(&BeforeRelayData{
+		ConnID:   p.id,
+		MailFrom: p.sMailAddr,
+		MailTo:   p.rMailAddr,
+		SenderIP: p.senderIP,
+		Helo:     p.sServerName,
+		Message:  message,
+	})
+
+	// Fallback to relay if hook returns nil
+	if result == nil {
+		result = &FilterResult{Action: FilterRelay}
+	}
+
+	p.inDataPhase = false
+	p.dataBuffer = nil
+
+	switch result.Action {
+	case FilterReject:
+		// Send reject reply directly to client, no server interaction
+		reply := sanitizeReply(result.Reply)
+		_, _ = p.sConn.Write([]byte(reply + crlf))
+		go p.afterCommHook([]byte(fmt.Sprintf("filter: reject (%s)", reply)), onPxy)
+
+	case FilterAddHeader:
+		// Store modified message, send DATA to server; downstream handles 354 and relay
+		p.pendingRelayMessage = result.Message
+		_, _ = p.rConn.Write([]byte("DATA" + crlf))
+		go p.afterCommHook([]byte("filter: add header"), onPxy)
+
+	default:
+		// FilterRelay or unknown action: store original message, send DATA to server
+		p.pendingRelayMessage = message
+		_, _ = p.rConn.Write([]byte("DATA" + crlf))
+		go p.afterCommHook([]byte("filter: relay"), onPxy)
+	}
+
+	return b, i, true
+}
+
+// hasResponseCode checks if any line in b starts with the given 3-digit SMTP response code.
+// Matches "CODE " or "CODE-" (multi-line) at line start per RFC 5321.
+func (p *Pipe) hasResponseCode(b []byte, code int) bool {
+	codeStr := fmt.Sprint(code)
+	for _, line := range bytes.Split(b, []byte("\n")) {
+		line = bytes.TrimRight(line, "\r")
+		if len(line) < 3 {
+			continue
+		}
+		if string(line[:3]) != codeStr {
+			continue
+		}
+		// Exact 3-char line, or followed by space/hyphen (RFC 5321 reply format)
+		if len(line) == 3 || line[3] == ' ' || line[3] == '-' {
+			return true
+		}
+	}
+	return false
+}
+
+// sanitizeReply removes CR/LF characters from an SMTP reply to prevent response injection.
+// Returns a safe default if the reply is empty or invalid.
+func sanitizeReply(reply string) string {
+	reply = strings.ReplaceAll(reply, "\r", "")
+	reply = strings.ReplaceAll(reply, "\n", "")
+	if reply == "" {
+		return "550 5.7.0 Message rejected"
+	}
+	return reply
+}
+
 func (p *Pipe) mediateOnDownstream(b []byte, i int) ([]byte, int, bool) {
 	data := b[0:i]
 
@@ -172,6 +327,26 @@ func (p *Pipe) mediateOnDownstream(b []byte, i int) ([]byte, int, bool) {
 	if p.isWaitedStarttlsRes {
 		p.isWaitedStarttlsRes = false
 		return b, i, true
+	}
+
+	// FilterHook: relay buffered message to server after receiving 354
+	if p.pendingRelayMessage != nil {
+		if p.hasResponseCode(data, codeStartingMailInput) {
+			// Server accepted DATA, relay buffered message + terminator
+			msg := p.pendingRelayMessage
+			p.pendingRelayMessage = nil
+			_, _ = p.rConn.Write(msg)
+			if !bytes.HasSuffix(msg, []byte(crlf)) {
+				_, _ = p.rConn.Write([]byte(crlf))
+			}
+			_, _ = p.rConn.Write(dataTerminator[2:]) // .\r\n
+			go p.afterCommHook([]byte("filter: message relayed to server"), onPxy)
+			return b, i, true // Suppress server's 354 (client already received fake 354)
+		}
+		// Server rejected DATA (e.g. 503, 451): forward error to client
+		p.pendingRelayMessage = nil
+		go p.afterCommHook([]byte("filter: server rejected DATA"), onPxy)
+		// Fall through to relay error response to client
 	}
 
 	// time before email input
@@ -314,7 +489,10 @@ func (p *Pipe) copy(dr Flow, fn Mediator) (written int64, err error) {
 
 	for {
 		var isContinue bool
-		if p.locked {
+		// Only block upstream while pipe is locked for TLS negotiation.
+		// Downstream must continue reading to receive the server's "220 Ready"
+		// response and complete the TLS handshake via connectTLS().
+		if p.locked && dr == upstream {
 			continue
 		}
 
@@ -411,8 +589,8 @@ func (p *Pipe) escapeCRLF(b []byte) []byte {
 }
 
 func (p *Pipe) Close() {
-	p.rConn.Close()
-	p.sConn.Close()
+	_ = p.rConn.Close()
+	_ = p.sConn.Close()
 	go p.afterCommHook([]byte("connections closed"), onPxy)
 	go p.afterConnHook()
 }

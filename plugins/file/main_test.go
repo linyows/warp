@@ -83,8 +83,7 @@ func TestFileWriter(t *testing.T) {
 
 	for _, v := range tests {
 		if v.envName != "" && v.envVal != "" {
-			os.Setenv(v.envName, v.envVal)
-			defer os.Unsetenv(v.envName)
+			t.Setenv(v.envName, v.envVal)
 		}
 
 		f := &File{}

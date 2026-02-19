@@ -51,7 +51,7 @@ func (s *Sqlite) conn() (*sql.DB, error) {
 	var err error
 	s.pool, err = sql.Open("sqlite", dsn)
 	if err != nil {
-		return nil, fmt.Errorf("sql.Open error: %s(%#v)\n", err.Error(), err)
+		return nil, fmt.Errorf("sql.Open error: %s(%#v)", err.Error(), err)
 	}
 
 	return s.pool, nil

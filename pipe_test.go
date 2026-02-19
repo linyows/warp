@@ -1,6 +1,10 @@
 package warp
 
 import (
+	"bytes"
+	"io"
+	"net"
+	"sync"
 	"testing"
 	"time"
 )
@@ -256,5 +260,745 @@ func TestElapse(t *testing.T) {
 		if got != v.expect {
 			t.Errorf("expected %#v got %#v", v.expect, got)
 		}
+	}
+}
+
+func TestIsDataCommand(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  []byte
+		expect bool
+	}{
+		{"uppercase", []byte("DATA\r\n"), true},
+		{"lowercase", []byte("data\r\n"), true},
+		{"mixed case", []byte("DaTa\r\n"), true},
+		{"with spaces", []byte("  DATA  \r\n"), true},
+		{"bare", []byte("DATA"), true},
+		{"not DATA command", []byte("MAIL FROM:<a@b.c>\r\n"), false},
+		{"DATA prefix", []byte("DATA extra\r\n"), false},
+		{"empty", []byte(""), false},
+		{"partial", []byte("DAT\r\n"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := &Pipe{}
+			got := p.isDataCommand(tt.input)
+			if got != tt.expect {
+				t.Errorf("isDataCommand(%q) = %v, want %v", tt.input, got, tt.expect)
+			}
+		})
+	}
+}
+
+func TestHasResponseCode(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  []byte
+		code   int
+		expect bool
+	}{
+		{"250 OK", []byte("250 2.0.0 Ok: queued\r\n"), 250, true},
+		{"250 plain", []byte("250 Ok\r\n"), 250, true},
+		{"354 response for 354", []byte("354 End data with <CR><LF>.<CR><LF>\r\n"), 354, true},
+		{"354 response for 250", []byte("354 End data with <CR><LF>.<CR><LF>\r\n"), 250, false},
+		{"550 error", []byte("550 5.7.1 Spam detected\r\n"), 250, false},
+		{"empty", []byte(""), 250, false},
+		{"250 in body text not at start", []byte("Hi, your order #250 is ready\r\n"), 250, false},
+		{"250 at second line start", []byte("OK your items\r\n250 Done\r\n"), 250, true},
+		{"no false match on 2500", []byte("2500 items\r\n"), 250, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := &Pipe{}
+			got := p.hasResponseCode(tt.input, tt.code)
+			if got != tt.expect {
+				t.Errorf("hasResponseCode(%q, %d) = %v, want %v", tt.input, tt.code, got, tt.expect)
+			}
+		})
+	}
+}
+
+func TestSanitizeReply(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		expect string
+	}{
+		{"normal reply", "550 5.7.1 Spam detected", "550 5.7.1 Spam detected"},
+		{"with CRLF injection", "550 bad\r\n250 fake ok", "550 bad250 fake ok"},
+		{"with LF only", "550 bad\n250 fake ok", "550 bad250 fake ok"},
+		{"empty", "", "550 5.7.0 Message rejected"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sanitizeReply(tt.input)
+			if got != tt.expect {
+				t.Errorf("sanitizeReply(%q) = %q, want %q", tt.input, got, tt.expect)
+			}
+		})
+	}
+}
+
+// newTestPipeWithConns creates a Pipe with net.Pipe connections for testing.
+// Returns the pipe and the "remote" ends of the connections (sRemote writes to sConn, rRemote reads from rConn).
+func newTestPipeWithConns(t *testing.T) (*Pipe, net.Conn, net.Conn) {
+	t.Helper()
+	sClient, sServer := net.Pipe()
+	rClient, rServer := net.Pipe()
+	p := &Pipe{
+		id:            "test-conn",
+		sConn:         sServer,
+		rConn:         rClient,
+		bufferSize:    10240000,
+		afterCommHook: func(b Data, to Direction) {},
+		afterConnHook: func() {},
+	}
+	t.Cleanup(func() {
+		_ = sClient.Close()
+		_ = sServer.Close()
+		_ = rClient.Close()
+		_ = rServer.Close()
+	})
+	return p, sClient, rServer
+}
+
+func TestHandleDataPhaseUpstream_Relay(t *testing.T) {
+	p, _, rRemote := newTestPipeWithConns(t)
+	p.inDataPhase = true
+	p.dataBuffer = &bytes.Buffer{}
+	p.sMailAddr = []byte("sender@example.test")
+	p.rMailAddr = []byte("rcpt@example.local")
+	p.senderIP = "192.168.1.1"
+	p.sServerName = []byte("mx.example.test")
+
+	var hookData *BeforeRelayData
+	p.beforeRelayHook = func(data *BeforeRelayData) *FilterResult {
+		hookData = data
+		return &FilterResult{Action: FilterRelay}
+	}
+
+	// Read DATA command sent to server after filter approval
+	var rBuf bytes.Buffer
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		buf := make([]byte, 4096)
+		n, _ := rRemote.Read(buf)
+		if n > 0 {
+			rBuf.Write(buf[:n])
+		}
+	}()
+
+	message := []byte("From: sender@example.test\r\nSubject: Test\r\n\r\nHello\r\n.\r\n")
+	buf := make([]byte, len(message))
+	copy(buf, message)
+
+	_, _, isContinue := p.handleDataPhaseUpstream(buf, len(message))
+	wg.Wait()
+
+	if !isContinue {
+		t.Error("expected isContinue=true for Relay action")
+	}
+	if p.inDataPhase {
+		t.Error("expected inDataPhase=false after handling")
+	}
+	if p.dataBuffer != nil {
+		t.Error("expected dataBuffer=nil after handling")
+	}
+
+	// Verify hook received correct data
+	if hookData == nil {
+		t.Fatal("BeforeRelay hook was not called")
+	}
+	if hookData.ConnID != "test-conn" {
+		t.Errorf("ConnID = %q, want %q", hookData.ConnID, "test-conn")
+	}
+	if string(hookData.MailFrom) != "sender@example.test" {
+		t.Errorf("MailFrom = %q, want %q", hookData.MailFrom, "sender@example.test")
+	}
+	if string(hookData.MailTo) != "rcpt@example.local" {
+		t.Errorf("MailTo = %q, want %q", hookData.MailTo, "rcpt@example.local")
+	}
+	if hookData.SenderIP != "192.168.1.1" {
+		t.Errorf("SenderIP = %q, want %q", hookData.SenderIP, "192.168.1.1")
+	}
+	if string(hookData.Helo) != "mx.example.test" {
+		t.Errorf("Helo = %q, want %q", hookData.Helo, "mx.example.test")
+	}
+
+	// Verify DATA command was sent to server (message stored in pendingRelayMessage)
+	if !bytes.Contains(rBuf.Bytes(), []byte("DATA\r\n")) {
+		t.Errorf("expected DATA command sent to server, got %q", rBuf.String())
+	}
+	if p.pendingRelayMessage == nil {
+		t.Fatal("pendingRelayMessage should be set for Relay action")
+	}
+	if !bytes.Contains(p.pendingRelayMessage, []byte("Subject: Test")) {
+		t.Errorf("pendingRelayMessage missing Subject header: %q", p.pendingRelayMessage)
+	}
+}
+
+func TestHandleDataPhaseUpstream_Reject(t *testing.T) {
+	p, sRemote, _ := newTestPipeWithConns(t)
+	p.inDataPhase = true
+	p.dataBuffer = &bytes.Buffer{}
+
+	p.beforeRelayHook = func(data *BeforeRelayData) *FilterResult {
+		return &FilterResult{
+			Action: FilterReject,
+			Reply:  "550 5.7.1 Spam detected",
+		}
+	}
+
+	// Read reject reply from sRemote (client side)
+	var sBuf bytes.Buffer
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		buf := make([]byte, 4096)
+		n, _ := sRemote.Read(buf)
+		if n > 0 {
+			sBuf.Write(buf[:n])
+		}
+	}()
+
+	message := []byte("From: spam@evil.test\r\n\r\nBuy now!\r\n.\r\n")
+	buf := make([]byte, len(message))
+	copy(buf, message)
+
+	_, _, isContinue := p.handleDataPhaseUpstream(buf, len(message))
+	wg.Wait()
+
+	if !isContinue {
+		t.Error("expected isContinue=true for Reject action")
+	}
+
+	// Verify reject reply sent directly to client
+	if !bytes.Contains(sBuf.Bytes(), []byte("550 5.7.1 Spam detected")) {
+		t.Errorf("expected reject reply sent to client, got %q", sBuf.String())
+	}
+
+	// Verify no pendingRelayMessage (server should not be involved)
+	if p.pendingRelayMessage != nil {
+		t.Error("pendingRelayMessage should be nil for Reject action")
+	}
+}
+
+func TestHandleDataPhaseUpstream_AddHeader(t *testing.T) {
+	p, _, rRemote := newTestPipeWithConns(t)
+	p.inDataPhase = true
+	p.dataBuffer = &bytes.Buffer{}
+
+	p.beforeRelayHook = func(data *BeforeRelayData) *FilterResult {
+		modified := append([]byte("X-Spam-Score: 0.1\r\n"), data.Message...)
+		return &FilterResult{
+			Action:  FilterAddHeader,
+			Message: modified,
+		}
+	}
+
+	// Read DATA command sent to server
+	var rBuf bytes.Buffer
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		buf := make([]byte, 4096)
+		n, _ := rRemote.Read(buf)
+		if n > 0 {
+			rBuf.Write(buf[:n])
+		}
+	}()
+
+	message := []byte("From: test@example.test\r\nSubject: Hi\r\n\r\nBody\r\n.\r\n")
+	buf := make([]byte, len(message))
+	copy(buf, message)
+
+	_, _, isContinue := p.handleDataPhaseUpstream(buf, len(message))
+	wg.Wait()
+
+	if !isContinue {
+		t.Error("expected isContinue=true for AddHeader action")
+	}
+
+	// Verify DATA command sent to server
+	if !bytes.Contains(rBuf.Bytes(), []byte("DATA\r\n")) {
+		t.Errorf("expected DATA command sent to server, got %q", rBuf.String())
+	}
+
+	// Verify modified message stored in pendingRelayMessage
+	if p.pendingRelayMessage == nil {
+		t.Fatal("pendingRelayMessage should be set for AddHeader action")
+	}
+	if !bytes.Contains(p.pendingRelayMessage, []byte("X-Spam-Score: 0.1")) {
+		t.Errorf("pendingRelayMessage missing added header: %q", p.pendingRelayMessage)
+	}
+	if !bytes.Contains(p.pendingRelayMessage, []byte("Subject: Hi")) {
+		t.Errorf("pendingRelayMessage missing original header: %q", p.pendingRelayMessage)
+	}
+}
+
+func TestHandleDataPhaseUpstream_Buffering(t *testing.T) {
+	p, _, _ := newTestPipeWithConns(t)
+	p.inDataPhase = true
+	p.dataBuffer = &bytes.Buffer{}
+	p.beforeRelayHook = func(data *BeforeRelayData) *FilterResult {
+		return &FilterResult{Action: FilterRelay}
+	}
+
+	// First chunk: incomplete message (no terminator)
+	chunk1 := []byte("From: test@example.test\r\nSubject: Hi\r\n\r\nHello ")
+	buf := make([]byte, len(chunk1))
+	copy(buf, chunk1)
+
+	_, _, isContinue := p.handleDataPhaseUpstream(buf, len(chunk1))
+	if !isContinue {
+		t.Error("expected isContinue=true for incomplete data")
+	}
+	if !p.inDataPhase {
+		t.Error("should still be in DATA phase after incomplete chunk")
+	}
+	if p.dataBuffer == nil {
+		t.Error("dataBuffer should not be nil while buffering")
+	}
+	if p.dataBuffer.Len() != len(chunk1) {
+		t.Errorf("dataBuffer length = %d, want %d", p.dataBuffer.Len(), len(chunk1))
+	}
+}
+
+func TestHandleDataPhaseUpstream_BufferOverflow(t *testing.T) {
+	p, sRemote, _ := newTestPipeWithConns(t)
+	p.inDataPhase = true
+	p.dataBuffer = &bytes.Buffer{}
+	p.dataBufferSize = 50 // Small limit
+	p.beforeRelayHook = func(data *BeforeRelayData) *FilterResult {
+		t.Fatal("filter hook should not be called on buffer overflow")
+		return nil
+	}
+
+	// Read 552 error from sRemote (client side)
+	var sBuf bytes.Buffer
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		buf := make([]byte, 4096)
+		n, _ := sRemote.Read(buf)
+		if n > 0 {
+			sBuf.Write(buf[:n])
+		}
+	}()
+
+	// Write enough to exceed the buffer limit
+	p.dataBuffer.Write([]byte("Already 40 bytes of data in the buffer!"))
+	overflow := []byte("This additional data exceeds the limit\r\n.\r\n")
+	buf := make([]byte, len(overflow))
+	copy(buf, overflow)
+
+	_, _, isContinue := p.handleDataPhaseUpstream(buf, len(overflow))
+	wg.Wait()
+
+	if !isContinue {
+		t.Error("expected isContinue=true on buffer overflow")
+	}
+	if p.inDataPhase {
+		t.Error("expected inDataPhase=false after overflow with terminator in chunk")
+	}
+	if p.dataBuffer != nil {
+		t.Error("expected dataBuffer=nil after overflow")
+	}
+
+	// Verify 552 error sent to client
+	if !bytes.Contains(sBuf.Bytes(), []byte("552")) {
+		t.Errorf("expected 552 error sent to client, got %q", sBuf.String())
+	}
+
+	// No server interaction (no pendingRelayMessage, no data sent to rConn)
+	if p.pendingRelayMessage != nil {
+		t.Error("pendingRelayMessage should be nil after overflow")
+	}
+}
+
+func TestHandleDataPhaseUpstream_BufferOverflowDiscardMode(t *testing.T) {
+	p, sRemote, _ := newTestPipeWithConns(t)
+	p.inDataPhase = true
+	p.dataBuffer = &bytes.Buffer{}
+	p.dataBufferSize = 50 // Small limit
+	p.beforeRelayHook = func(data *BeforeRelayData) *FilterResult {
+		t.Fatal("filter hook should not be called on buffer overflow")
+		return nil
+	}
+
+	// Read 552 error from sRemote
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		buf := make([]byte, 4096)
+		_, _ = sRemote.Read(buf)
+	}()
+
+	// Overflow without terminator → enters discard mode
+	p.dataBuffer.Write([]byte("Already 40 bytes of data in the buffer!"))
+	overflow := []byte("This additional data exceeds the limit")
+	buf := make([]byte, len(overflow))
+	copy(buf, overflow)
+
+	_, _, isContinue := p.handleDataPhaseUpstream(buf, len(overflow))
+	wg.Wait()
+
+	if !isContinue {
+		t.Error("expected isContinue=true on buffer overflow")
+	}
+	if !p.discardingData {
+		t.Error("expected discardingData=true when terminator not in overflow chunk")
+	}
+	if !p.inDataPhase {
+		t.Error("expected inDataPhase=true while discarding (waiting for terminator)")
+	}
+
+	// Send more data (should be discarded)
+	moreData := []byte("more data without terminator")
+	buf2 := make([]byte, len(moreData))
+	copy(buf2, moreData)
+	_, _, isContinue = p.handleDataPhaseUpstream(buf2, len(moreData))
+	if !isContinue {
+		t.Error("expected isContinue=true while discarding")
+	}
+	if !p.discardingData {
+		t.Error("expected still discarding")
+	}
+
+	// Send terminator (should exit discard mode)
+	terminator := []byte("\r\n.\r\n")
+	buf3 := make([]byte, len(terminator))
+	copy(buf3, terminator)
+	_, _, isContinue = p.handleDataPhaseUpstream(buf3, len(terminator))
+	if !isContinue {
+		t.Error("expected isContinue=true for terminator in discard mode")
+	}
+	if p.discardingData {
+		t.Error("expected discardingData=false after terminator")
+	}
+	if p.inDataPhase {
+		t.Error("expected inDataPhase=false after terminator in discard mode")
+	}
+}
+
+func TestMediateOnUpstream_FilterHookDataCommand(t *testing.T) {
+	p, sRemote, _ := newTestPipeWithConns(t)
+	p.beforeRelayHook = func(data *BeforeRelayData) *FilterResult {
+		return &FilterResult{Action: FilterRelay}
+	}
+
+	// Read fake 354 from sRemote (client side)
+	var sBuf bytes.Buffer
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		buf := make([]byte, 4096)
+		n, _ := sRemote.Read(buf)
+		if n > 0 {
+			sBuf.Write(buf[:n])
+		}
+	}()
+
+	data := []byte("DATA\r\n")
+	buf := make([]byte, 1024)
+	copy(buf, data)
+
+	_, _, isContinue := p.mediateOnUpstream(buf, len(data))
+	wg.Wait()
+
+	if !isContinue {
+		t.Error("DATA command should be suppressed (isContinue=true) with filter hook")
+	}
+	if !p.inDataPhase {
+		t.Error("inDataPhase should be true after DATA command interception")
+	}
+	if p.dataBuffer == nil {
+		t.Error("dataBuffer should be initialized after DATA command")
+	}
+
+	// Verify fake 354 sent to client
+	if !bytes.Contains(sBuf.Bytes(), []byte("354")) {
+		t.Errorf("expected fake 354 sent to client, got %q", sBuf.String())
+	}
+}
+
+func TestMediateOnUpstream_NoFilterHookBypass(t *testing.T) {
+	p := &Pipe{
+		afterCommHook:   func(b Data, to Direction) {},
+		beforeRelayHook: nil, // No filter hook
+	}
+
+	data := []byte("DATA\r\n")
+	buf := make([]byte, 1024)
+	copy(buf, data)
+
+	_, _, isContinue := p.mediateOnUpstream(buf, len(data))
+
+	if isContinue {
+		t.Error("without filter hook, should not suppress relay")
+	}
+	if p.inDataPhase {
+		t.Error("inDataPhase should remain false without filter hook")
+	}
+}
+
+func TestMediateOnUpstream_DelegatesInDataPhase(t *testing.T) {
+	p, _, rRemote := newTestPipeWithConns(t)
+	p.inDataPhase = true
+	p.dataBuffer = &bytes.Buffer{}
+
+	hookCalled := false
+	p.beforeRelayHook = func(data *BeforeRelayData) *FilterResult {
+		hookCalled = true
+		return &FilterResult{Action: FilterRelay}
+	}
+
+	// Read rRemote in background
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_, _ = io.ReadAll(rRemote)
+	}()
+
+	message := []byte("Subject: test\r\n\r\nBody\r\n.\r\n")
+	buf := make([]byte, 1024)
+	copy(buf, message)
+
+	_, _, isContinue := p.mediateOnUpstream(buf, len(message))
+	// Close to unblock reader
+	_ = p.rConn.Close()
+	wg.Wait()
+
+	if !isContinue {
+		t.Error("expected isContinue=true in DATA phase")
+	}
+	if !hookCalled {
+		t.Error("expected BeforeRelay hook to be called")
+	}
+}
+
+func TestMediateOnDownstream_PendingRelayOn354(t *testing.T) {
+	p, _, rRemote := newTestPipeWithConns(t)
+	p.pendingRelayMessage = []byte("Subject: Test\r\n\r\nHello\r\n")
+
+	// Read relayed message from rRemote (server side)
+	var rBuf bytes.Buffer
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		buf := make([]byte, 4096)
+		for {
+			n, err := rRemote.Read(buf)
+			if n > 0 {
+				rBuf.Write(buf[:n])
+			}
+			if bytes.Contains(rBuf.Bytes(), []byte(".\r\n")) || err != nil {
+				break
+			}
+		}
+	}()
+
+	resp := []byte("354 End data with <CR><LF>.<CR><LF>\r\n")
+	buf := make([]byte, 1024)
+	copy(buf, resp)
+
+	_, _, isContinue := p.mediateOnDownstream(buf, len(resp))
+	wg.Wait()
+
+	if !isContinue {
+		t.Error("expected isContinue=true to suppress server's 354")
+	}
+	if p.pendingRelayMessage != nil {
+		t.Error("pendingRelayMessage should be cleared after relay")
+	}
+
+	// Verify message + terminator relayed to server
+	relayed := rBuf.String()
+	if !bytes.Contains([]byte(relayed), []byte("Subject: Test")) {
+		t.Errorf("relayed data missing Subject header: %q", relayed)
+	}
+	if !bytes.HasSuffix([]byte(relayed), []byte(".\r\n")) {
+		t.Errorf("relayed data should end with terminator: %q", relayed)
+	}
+}
+
+func TestMediateOnDownstream_PendingRelayServerReject(t *testing.T) {
+	p := &Pipe{
+		afterCommHook:       func(b Data, to Direction) {},
+		pendingRelayMessage: []byte("Subject: Test\r\n\r\nHello\r\n"),
+	}
+
+	// Server rejects DATA command with 503
+	resp := []byte("503 5.5.1 Bad sequence of commands\r\n")
+	buf := make([]byte, 1024)
+	copy(buf, resp)
+
+	_, _, isContinue := p.mediateOnDownstream(buf, len(resp))
+
+	if isContinue {
+		t.Error("expected isContinue=false to forward server error to client")
+	}
+	if p.pendingRelayMessage != nil {
+		t.Error("pendingRelayMessage should be cleared after server rejection")
+	}
+}
+
+func TestMediateOnUpstream_MetadataExtractionWithFilterHook(t *testing.T) {
+	p := &Pipe{
+		afterCommHook: func(b Data, to Direction) {},
+		beforeRelayHook: func(data *BeforeRelayData) *FilterResult {
+			return &FilterResult{Action: FilterRelay}
+		},
+	}
+
+	// MAIL FROM should still be extracted even with filter hook
+	data := []byte("MAIL FROM:<alice@example.test> SIZE=4095\r\n")
+	buf := make([]byte, 1024)
+	copy(buf, data)
+
+	p.mediateOnUpstream(buf, len(data))
+
+	if string(p.sMailAddr) != "alice@example.test" {
+		t.Errorf("sMailAddr = %q, want %q", p.sMailAddr, "alice@example.test")
+	}
+}
+
+func TestHandleDataPhaseUpstream_NilResult(t *testing.T) {
+	p, _, rRemote := newTestPipeWithConns(t)
+	p.inDataPhase = true
+	p.dataBuffer = &bytes.Buffer{}
+
+	// Hook returns nil — should fallback to FilterRelay (store message, send DATA to server)
+	p.beforeRelayHook = func(data *BeforeRelayData) *FilterResult {
+		return nil
+	}
+
+	var rBuf bytes.Buffer
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		buf := make([]byte, 4096)
+		n, _ := rRemote.Read(buf)
+		if n > 0 {
+			rBuf.Write(buf[:n])
+		}
+	}()
+
+	message := []byte("Subject: test\r\n\r\nBody\r\n.\r\n")
+	buf := make([]byte, len(message))
+	copy(buf, message)
+
+	_, _, isContinue := p.handleDataPhaseUpstream(buf, len(message))
+	wg.Wait()
+
+	if !isContinue {
+		t.Error("expected isContinue=true")
+	}
+	// Should send DATA to server and store message in pendingRelayMessage
+	if !bytes.Contains(rBuf.Bytes(), []byte("DATA\r\n")) {
+		t.Errorf("expected DATA sent to server on nil result, got %q", rBuf.String())
+	}
+	if p.pendingRelayMessage == nil {
+		t.Fatal("pendingRelayMessage should be set on nil result (fallback to Relay)")
+	}
+	if !bytes.Contains(p.pendingRelayMessage, []byte("Subject: test")) {
+		t.Errorf("pendingRelayMessage missing content: %q", p.pendingRelayMessage)
+	}
+}
+
+func TestHandleDataPhaseUpstream_UnknownAction(t *testing.T) {
+	p, _, rRemote := newTestPipeWithConns(t)
+	p.inDataPhase = true
+	p.dataBuffer = &bytes.Buffer{}
+
+	// Hook returns unknown action — should fallback to FilterRelay
+	p.beforeRelayHook = func(data *BeforeRelayData) *FilterResult {
+		return &FilterResult{Action: FilterAction(99)}
+	}
+
+	var rBuf bytes.Buffer
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		buf := make([]byte, 4096)
+		n, _ := rRemote.Read(buf)
+		if n > 0 {
+			rBuf.Write(buf[:n])
+		}
+	}()
+
+	message := []byte("Subject: unknown\r\n\r\nBody\r\n.\r\n")
+	buf := make([]byte, len(message))
+	copy(buf, message)
+
+	_, _, isContinue := p.handleDataPhaseUpstream(buf, len(message))
+	wg.Wait()
+
+	if !isContinue {
+		t.Error("expected isContinue=true")
+	}
+	if !bytes.Contains(rBuf.Bytes(), []byte("DATA\r\n")) {
+		t.Errorf("expected DATA sent to server on unknown action, got %q", rBuf.String())
+	}
+	if p.pendingRelayMessage == nil {
+		t.Fatal("pendingRelayMessage should be set on unknown action")
+	}
+	if !bytes.Contains(p.pendingRelayMessage, []byte("Subject: unknown")) {
+		t.Errorf("pendingRelayMessage missing content: %q", p.pendingRelayMessage)
+	}
+}
+
+func TestHandleDataPhaseUpstream_RejectSanitizesReply(t *testing.T) {
+	p, sRemote, _ := newTestPipeWithConns(t)
+	p.inDataPhase = true
+	p.dataBuffer = &bytes.Buffer{}
+
+	// Hook returns reply with CRLF injection attempt
+	p.beforeRelayHook = func(data *BeforeRelayData) *FilterResult {
+		return &FilterResult{
+			Action: FilterReject,
+			Reply:  "550 bad\r\n250 fake ok",
+		}
+	}
+
+	// Read sanitized reply from sRemote (client side)
+	var sBuf bytes.Buffer
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		buf := make([]byte, 4096)
+		n, _ := sRemote.Read(buf)
+		if n > 0 {
+			sBuf.Write(buf[:n])
+		}
+	}()
+
+	message := []byte("Subject: test\r\n\r\nBody\r\n.\r\n")
+	buf := make([]byte, len(message))
+	copy(buf, message)
+
+	p.handleDataPhaseUpstream(buf, len(message))
+	wg.Wait()
+
+	// CR/LF should be stripped, sent directly to client
+	reply := sBuf.String()
+	if !bytes.Contains([]byte(reply), []byte("550 bad250 fake ok")) {
+		t.Errorf("expected sanitized reply sent to client, got %q", reply)
+	}
+	// Should NOT contain injected CRLF
+	if bytes.Contains([]byte(reply), []byte("\r\n250")) {
+		t.Errorf("CRLF injection not sanitized in reply: %q", reply)
 	}
 }

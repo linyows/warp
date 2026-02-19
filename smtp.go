@@ -29,7 +29,7 @@ const (
 )
 
 func WaitForServerListen(ip string, port int) {
-	host := fmt.Sprintf("%s:%d", ip, port)
+	host := net.JoinHostPort(ip, fmt.Sprint(port))
 	fmt.Printf("Wait for port %d listen...", port)
 	for {
 		timeout := time.Second
@@ -39,7 +39,7 @@ func WaitForServerListen(ip string, port int) {
 		}
 		if conn != nil {
 			fmt.Print("\n")
-			conn.Close()
+			_ = conn.Close()
 			break
 		}
 	}
@@ -109,7 +109,7 @@ func (s *SMTPServer) Serve() error {
 	if err != nil {
 		return fmt.Errorf("net.Listen(tcp) error: %#v", err)
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 
 	s.log.Printf("SMTP server is listening on :%d\n", s.Port)
 
@@ -140,13 +140,13 @@ type SMTPConn struct {
 }
 
 func (c *SMTPConn) handle(conn net.Conn) {
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	c.reader = bufio.NewReader(conn)
 	c.writer = bufio.NewWriter(conn)
 
 	c.writeStringWithLog(fmt.Sprintf("220 %s ESMTP Server", c.hostname))
-	c.writer.Flush()
+	_ = c.writer.Flush()
 	c.data = false
 
 	for {
@@ -202,7 +202,7 @@ func (c *SMTPConn) handle(conn net.Conn) {
 				c.writeStringWithLog("354 End data with <CR><LF>.<CR><LF>")
 			case "QUIT":
 				c.writeStringWithLog("221 2.0.0 Bye")
-				c.writer.Flush()
+				_ = c.writer.Flush()
 				return
 			case ".":
 				c.data = false
@@ -229,7 +229,7 @@ func (c *SMTPConn) handle(conn net.Conn) {
 				c.writeStringWithLog("502 5.5.1 VRFY command is disabled")
 			case "STARTTLS":
 				c.writeStringWithLog("220 2.0.0 Ready to start TLS")
-				c.writer.Flush()
+				_ = c.writer.Flush()
 				c.startTLS(conn)
 			default:
 				if c.data {
@@ -240,7 +240,7 @@ func (c *SMTPConn) handle(conn net.Conn) {
 			}
 		}
 
-		c.writer.Flush()
+		_ = c.writer.Flush()
 	}
 }
 

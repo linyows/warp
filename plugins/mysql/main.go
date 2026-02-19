@@ -35,7 +35,7 @@ func (m *Mysql) conn() (*sql.DB, error) {
 	var err error
 	m.pool, err = sql.Open("mysql", dsn)
 	if err != nil {
-		return nil, fmt.Errorf("sql.Open error: %s\n", err)
+		return nil, fmt.Errorf("sql.Open error: %s", err)
 	}
 
 	return m.pool, nil
