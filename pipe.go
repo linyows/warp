@@ -39,13 +39,12 @@ type Pipe struct {
 	afterConnHook func()
 
 	// DATA phase buffering for filter hooks
-	dataCommandSent      bool
-	inDataPhase          bool
-	dataBuffer           *bytes.Buffer
-	dataBufferSize       int
-	filterRejectReply    string
-	suppressNextResponse bool
-	senderIP             string
+	inDataPhase        bool
+	dataBuffer         *bytes.Buffer
+	dataBufferSize     int
+	discardingData     bool     // discard remaining client data after buffer overflow
+	pendingRelayMessage []byte  // buffered message waiting for server 354 after filter approval
+	senderIP           string
 
 	// Filter hook (nil if no FilterHook registered)
 	beforeRelayHook func(*BeforeRelayData) *FilterResult
@@ -148,10 +147,14 @@ func (p *Pipe) mediateOnUpstream(b []byte, i int) ([]byte, int, bool) {
 			return p.handleDataPhaseUpstream(b, i)
 		}
 		if p.isDataCommand(data) {
-			p.dataCommandSent = true
+			// Don't relay DATA to server; send fake 354 to client
+			_, _ = p.sConn.Write([]byte("354 Start mail input" + crlf))
+			p.inDataPhase = true
 			p.dataBuffer = &bytes.Buffer{}
-			go p.afterCommHook(data, srcToDst)
-			return b, i, false // Relay DATA command to server
+			p.timeAtDataStarting = time.Now()
+			go p.afterCommHook(data, srcToPxy)
+			go p.afterCommHook([]byte("354 Start mail input"), pxyToSrc)
+			return b, i, true // Suppress relay to server
 		}
 	}
 
@@ -194,15 +197,27 @@ var dataTerminator = []byte("\r\n.\r\n")
 func (p *Pipe) handleDataPhaseUpstream(b []byte, i int) ([]byte, int, bool) {
 	data := b[0:i]
 
+	// Discard mode: consume remaining client data after buffer overflow until terminator
+	if p.discardingData {
+		if bytes.Contains(data, dataTerminator) {
+			p.inDataPhase = false
+			p.discardingData = false
+		}
+		return b, i, true
+	}
+
 	// Buffer size check
 	if p.dataBufferSize > 0 && p.dataBuffer.Len()+len(data) > p.dataBufferSize {
-		// Buffer overflow: send error to client, empty terminator to server
+		// Buffer overflow: send error to client, no server interaction
 		_, _ = p.sConn.Write([]byte("552 5.3.4 Message too big for filter" + crlf))
-		_, _ = p.rConn.Write(dataTerminator)
-		p.inDataPhase = false
 		p.dataBuffer = nil
-		p.suppressNextResponse = true
+		p.discardingData = true
 		go p.afterCommHook([]byte("filter buffer overflow"), onPxy)
+		// Check if terminator is in current chunk
+		if bytes.Contains(data, dataTerminator) {
+			p.inDataPhase = false
+			p.discardingData = false
+		}
 		return b, i, true
 	}
 
@@ -240,25 +255,22 @@ func (p *Pipe) handleDataPhaseUpstream(b []byte, i int) ([]byte, int, bool) {
 	p.dataBuffer = nil
 
 	switch result.Action {
+	case FilterReject:
+		// Send reject reply directly to client, no server interaction
+		reply := sanitizeReply(result.Reply)
+		_, _ = p.sConn.Write([]byte(reply + crlf))
+		go p.afterCommHook([]byte(fmt.Sprintf("filter: reject (%s)", reply)), onPxy)
+
 	case FilterAddHeader:
-		// Relay modified message + terminator to server
-		_, _ = p.rConn.Write(result.Message)
-		if !bytes.HasSuffix(result.Message, []byte(crlf)) {
-			_, _ = p.rConn.Write([]byte(crlf))
-		}
-		_, _ = p.rConn.Write(dataTerminator[2:]) // .\r\n
+		// Store modified message, send DATA to server; downstream handles 354 and relay
+		p.pendingRelayMessage = result.Message
+		_, _ = p.rConn.Write([]byte("DATA" + crlf))
 		go p.afterCommHook([]byte("filter: add header"), onPxy)
 
-	case FilterReject:
-		// Send empty terminator to server, set reject reply for downstream
-		_, _ = p.rConn.Write(dataTerminator)
-		p.filterRejectReply = sanitizeReply(result.Reply)
-		go p.afterCommHook([]byte(fmt.Sprintf("filter: reject (%s)", p.filterRejectReply)), onPxy)
-
 	default:
-		// FilterRelay or unknown action: relay original message
-		_, _ = p.rConn.Write(message)
-		_, _ = p.rConn.Write(dataTerminator[2:]) // .\r\n
+		// FilterRelay or unknown action: store original message, send DATA to server
+		p.pendingRelayMessage = message
+		_, _ = p.rConn.Write([]byte("DATA" + crlf))
 		go p.afterCommHook([]byte("filter: relay"), onPxy)
 	}
 
@@ -317,32 +329,24 @@ func (p *Pipe) mediateOnDownstream(b []byte, i int) ([]byte, int, bool) {
 		return b, i, true
 	}
 
-	// FilterHook: detect 354 response to enter DATA phase
-	if p.beforeRelayHook != nil && p.dataCommandSent {
+	// FilterHook: relay buffered message to server after receiving 354
+	if p.pendingRelayMessage != nil {
 		if p.hasResponseCode(data, codeStartingMailInput) {
-			p.inDataPhase = true
-			p.dataCommandSent = false
-		} else {
-			// Non-354 response (e.g. 503, 451): clear DATA command state
-			p.dataCommandSent = false
-			p.dataBuffer = nil
+			// Server accepted DATA, relay buffered message + terminator
+			msg := p.pendingRelayMessage
+			p.pendingRelayMessage = nil
+			_, _ = p.rConn.Write(msg)
+			if !bytes.HasSuffix(msg, []byte(crlf)) {
+				_, _ = p.rConn.Write([]byte(crlf))
+			}
+			_, _ = p.rConn.Write(dataTerminator[2:]) // .\r\n
+			go p.afterCommHook([]byte("filter: message relayed to server"), onPxy)
+			return b, i, true // Suppress server's 354 (client already received fake 354)
 		}
-	}
-
-	// FilterHook: suppress server's response after buffer overflow
-	if p.suppressNextResponse && p.hasResponseCode(data, codeActionCompleted) {
-		p.suppressNextResponse = false
-		go p.afterCommHook([]byte("filter: suppressed server response after overflow"), onPxy)
-		return b, i, true
-	}
-
-	// FilterHook: replace server's 250 OK with reject reply
-	if p.filterRejectReply != "" && p.hasResponseCode(data, codeActionCompleted) {
-		reply := p.filterRejectReply
-		p.filterRejectReply = ""
-		_, _ = p.sConn.Write([]byte(reply + crlf))
-		go p.afterCommHook([]byte(reply), pxyToSrc)
-		return b, i, true // Suppress server's 250 OK
+		// Server rejected DATA (e.g. 503, 451): forward error to client
+		p.pendingRelayMessage = nil
+		go p.afterCommHook([]byte("filter: server rejected DATA"), onPxy)
+		// Fall through to relay error response to client
 	}
 
 	// time before email input

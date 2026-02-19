@@ -455,6 +455,14 @@ func TestE2EFilter(t *testing.T) {
 		if !strings.Contains(err.Error(), "550") {
 			t.Errorf("expected 550 error, got: %v", err)
 		}
+
+		// Verify server did NOT receive the rejected message
+		select {
+		case msg := <-env.messages:
+			t.Errorf("server should not receive rejected message, but got: MailFrom=%q", msg.MailFrom)
+		case <-time.After(500 * time.Millisecond):
+			// Expected: no message received
+		}
 	})
 
 	t.Run("AddHeader", func(t *testing.T) {
