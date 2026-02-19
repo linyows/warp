@@ -2,7 +2,6 @@ package warp
 
 import (
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"path"
@@ -57,13 +56,13 @@ func (p *Plugins) load() error {
 		return nil
 	}
 
-	files, err := ioutil.ReadDir(p.path)
+	files, err := os.ReadDir(p.path)
 	if err != nil {
 		return err
 	}
 
 	for _, f := range files {
-		if !f.Mode().IsRegular() {
+		if !f.Type().IsRegular() {
 			continue
 		}
 		n := f.Name()

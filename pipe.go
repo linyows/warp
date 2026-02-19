@@ -582,8 +582,8 @@ func (p *Pipe) escapeCRLF(b []byte) []byte {
 }
 
 func (p *Pipe) Close() {
-	p.rConn.Close()
-	p.sConn.Close()
+	_ = p.rConn.Close()
+	_ = p.sConn.Close()
 	go p.afterCommHook([]byte("connections closed"), onPxy)
 	go p.afterConnHook()
 }

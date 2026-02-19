@@ -41,7 +41,7 @@ func main() {
 		MessageSizeLimit: *maxSize,
 	}
 
-	if "" != *plugins {
+	if *plugins != "" {
 		pp := strings.Split(*plugins, ",")
 		for i := range pp {
 			pp[i] = strings.TrimSpace(pp[i])

@@ -983,7 +983,7 @@ func TestHandleDataPhaseUpstream_RejectSanitizesReply(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		buf := make([]byte, 4096)
-		rRemote.Read(buf)
+		_, _ = rRemote.Read(buf)
 	}()
 
 	message := []byte("Subject: test\r\n\r\nBody\r\n.\r\n")

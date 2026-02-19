@@ -59,7 +59,7 @@ func (s *Server) Start() error {
 	if err != nil {
 		return err
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	s.log.Printf("warp listens to %s:%d", s.Addr, s.Port)
 
 	for {
@@ -73,7 +73,7 @@ func (s *Server) Start() error {
 			s.log.Printf("failed to extract connection IP: %s(%#v)", err.Error(), err)
 		}
 		if s.Addr == remoteAddr && strconv.Itoa(s.Port) == remotePort {
-			conn.Close()
+			_ = conn.Close()
 			s.log.Printf("closed connection due to same ip(looping requests to warp?): %s", conn.RemoteAddr())
 			continue
 		}
@@ -211,7 +211,7 @@ func (s *Server) OriginalAddrDst(conn net.Conn) (*net.TCPAddr, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	fd := f.Fd()
 
 	addr, err := syscall.GetsockoptIPv6Mreq(int(fd), syscall.IPPROTO_IP, SO_ORIGINAL_DST)

@@ -37,7 +37,7 @@ func (f *File) writer() (io.Writer, error) {
 	var err error
 	f.file, err = os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		return nil, fmt.Errorf("os.OpenFile error: %s\n", err)
+		return nil, fmt.Errorf("os.OpenFile error: %s", err)
 	}
 
 	return f.file, nil
