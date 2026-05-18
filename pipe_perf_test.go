@@ -204,18 +204,39 @@ func BenchmarkMediateOnDownstream_EHLOResponse(b *testing.B) {
 // Layer B: Regression test documenting the removeStartTLSCommand misfire.
 // ─────────────────────────────────────────────────────────────────────
 
-// TestMediateOnDownstream_RemoveStartTLSMisfire reproduces the bug described
-// in PERFORMANCE_INVESTIGATION.md "発見 A": when a downstream chunk happens
-// to contain both "250" and "STARTTLS" (here, the literal sequence
-// "250-STARTTLS\r\n" embedded in a relayed mail body), the classifier
-// returns true, removeStartTLSCommand runs bytes.Replace over the chunk,
-// and p.readytls is wrongly flipped to true.
-//
-// This test asserts the CURRENT (buggy) behavior so the misfire is locked in
-// as a regression. After the fix lands (e.g. an ehloResponseHandled latch on
-// the Pipe), this test should be updated to assert that p.readytls remains
-// false and that removeStartTLSCommand is NOT invoked.
-func TestMediateOnDownstream_RemoveStartTLSMisfire(t *testing.T) {
+// TestMediateOnDownstream_RemoveStartTLSNoMisfireAfterEHLO verifies the fix
+// for PERFORMANCE_INVESTIGATION.md "発見 A": once the first EHLO response
+// has been handled, downstream chunks that happen to contain "250" and
+// "STARTTLS" — e.g. a mail body where "250-STARTTLS\r\n" appears in
+// documentation text — must NOT retrigger removeStartTLSCommand, must NOT
+// allocate a full-buffer bytes.Replace copy, and must NOT flip p.readytls.
+func TestMediateOnDownstream_RemoveStartTLSNoMisfireAfterEHLO(t *testing.T) {
+	p := &Pipe{
+		afterCommHook: func(b Data, to Direction) {},
+		afterConnHook: func() {},
+	}
+
+	// First, process a legitimate EHLO response so the ehloResponseHandled
+	// latch is engaged. The buffer is a complete "250-...\r\n...250 ...\r\n"
+	// response advertising STARTTLS — the real classifier target.
+	ehlo := buildEHLOResponseChunk()
+	if !p.isResponseOfEHLOWithStartTLS(ehlo) {
+		t.Fatalf("precondition: classifier should fire on a real EHLO response")
+	}
+	ehloBuf := make([]byte, len(ehlo))
+	copy(ehloBuf, ehlo)
+	_, _, _ = p.mediateOnDownstream(ehloBuf, len(ehloBuf))
+	if !p.readytls {
+		t.Fatalf("expected p.readytls=true after handling a real EHLO STARTTLS response, got false")
+	}
+	if !p.ehloResponseHandled {
+		t.Fatalf("expected ehloResponseHandled=true after first EHLO response, got false")
+	}
+
+	// Now simulate the dangerous case: a downstream chunk that mimics a
+	// mail body containing both "250" and "STARTTLS" (including the literal
+	// "250-STARTTLS\r\n" sequence). The classifier must return false and
+	// removeStartTLSCommand must NOT be invoked.
 	body := []byte("From: alice@example.test\r\n" +
 		"To: bob@example.local\r\n" +
 		"Subject: TLS notes\r\n" +
@@ -223,22 +244,17 @@ func TestMediateOnDownstream_RemoveStartTLSMisfire(t *testing.T) {
 		"Our EHLO continuation looks like 250-STARTTLS\r\n" +
 		"...and that is the issue.\r\n")
 
-	p := &Pipe{
-		afterCommHook: func(b Data, to Direction) {},
-		afterConnHook: func() {},
+	if p.isResponseOfEHLOWithStartTLS(body) {
+		t.Fatalf("expected classifier to suppress misfire on mail-body chunk after EHLO was handled, got true")
 	}
 
-	if !p.isResponseOfEHLOWithStartTLS(body) {
-		t.Fatalf("precondition: classifier should misfire on the mail-body chunk, got false")
-	}
+	// Reset p.readytls so we can assert mediateOnDownstream does NOT set it.
+	p.readytls = false
+	bodyBuf := make([]byte, len(body))
+	copy(bodyBuf, body)
+	_, _, _ = p.mediateOnDownstream(bodyBuf, len(bodyBuf))
 
-	buf := make([]byte, len(body))
-	copy(buf, body)
-	_, _, _ = p.mediateOnDownstream(buf, len(buf))
-
-	if !p.readytls {
-		t.Fatalf("expected p.readytls=true after the misfired removeStartTLSCommand; got false. " +
-			"If this trips, the misfire was likely fixed upstream — invert this assertion " +
-			"(and rename the test) to lock in the fix.")
+	if p.readytls {
+		t.Fatalf("expected p.readytls=false after mail-body chunk; got true (misfire regression)")
 	}
 }

@@ -32,6 +32,12 @@ type Pipe struct {
 	isWaitedStarttlsRes bool
 	isHeaderRemoved     bool
 
+	// ehloResponseHandled latches once the first EHLO response (with or
+	// without STARTTLS) has been classified, so that later downstream
+	// chunks — including mail-body bytes that happen to contain "250" and
+	// "STARTTLS" — cannot retrigger removeStartTLSCommand.
+	ehloResponseHandled bool
+
 	timeAtConnected    time.Time
 	timeAtDataStarting time.Time
 
@@ -315,6 +321,7 @@ func (p *Pipe) mediateOnDownstream(b []byte, i int) ([]byte, int, bool) {
 		go p.afterCommHook(data, dstToPxy)
 		b, i = p.removeStartTLSCommand(b, i)
 		data = b[0:i]
+		p.ehloResponseHandled = true
 	} else if p.isResponseOfReadyToStartTLS(b) {
 		go p.afterCommHook(data, dstToPxy)
 		er := p.connectTLS()
@@ -353,6 +360,7 @@ func (p *Pipe) mediateOnDownstream(b []byte, i int) ([]byte, int, bool) {
 	p.setTimeAtDataStarting(b)
 
 	if p.isResponseOfEHLOWithoutStartTLS(b) {
+		p.ehloResponseHandled = true
 		go p.afterCommHook(data, pxyToSrc)
 	} else {
 		go p.afterCommHook(data, dstToSrc)
@@ -596,11 +604,17 @@ func (p *Pipe) Close() {
 }
 
 func (p *Pipe) isResponseOfEHLOWithStartTLS(b []byte) bool {
-	return !p.tls && !p.locked && bytes.Contains(b, []byte(fmt.Sprint(codeActionCompleted))) && bytes.Contains(b, []byte("STARTTLS"))
+	if p.tls || p.locked || p.ehloResponseHandled {
+		return false
+	}
+	return bytes.Contains(b, []byte(fmt.Sprint(codeActionCompleted))) && bytes.Contains(b, []byte("STARTTLS"))
 }
 
 func (p *Pipe) isResponseOfEHLOWithoutStartTLS(b []byte) bool {
-	return !p.tls && !p.locked && bytes.Contains(b, []byte(fmt.Sprint(codeActionCompleted))) && !bytes.Contains(b, []byte("STARTTLS"))
+	if p.tls || p.locked || p.ehloResponseHandled {
+		return false
+	}
+	return bytes.Contains(b, []byte(fmt.Sprint(codeActionCompleted))) && !bytes.Contains(b, []byte("STARTTLS"))
 }
 
 func (p *Pipe) isResponseOfReadyToStartTLS(b []byte) bool {
