@@ -475,7 +475,10 @@ func (p *Pipe) Do() {
 	go p.afterCommHook([]byte(fmt.Sprintf("connected to %s", p.rAddr)), onPxy)
 
 	p.blocker = make(chan interface{})
-	done := make(chan bool)
+	// Buffered so neither copy-goroutine can block on its completion send,
+	// preventing the previously observed goroutine leak when one side
+	// finishes before the other.
+	done := make(chan bool, 2)
 
 	// Sender --- packet --> Proxy
 	go func() {
@@ -495,6 +498,13 @@ func (p *Pipe) Do() {
 		done <- true
 	}()
 
+	// Wait for one side to finish, force-close both connections so the
+	// other side's blocked Read returns with net.ErrClosed, then wait for
+	// it as well. This guarantees both goroutines exit before Do returns,
+	// so their pooled buffers can be released and no goroutines are leaked.
+	<-done
+	_ = p.sConn.Close()
+	_ = p.rConn.Close()
 	<-done
 }
 
