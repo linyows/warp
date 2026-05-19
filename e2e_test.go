@@ -95,6 +95,27 @@ func (h *testFilterHook) BeforeRelay(data *BeforeRelayData) *FilterResult {
 	return &FilterResult{Action: FilterRelay}
 }
 
+// syncBuffer is a goroutine-safe wrapper around bytes.Buffer for tests
+// that read the buffer's contents (typically for diagnostic Printf) while
+// server goroutines may still be writing to it via the standard log
+// package. Implements io.Writer and fmt.Stringer.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.String()
+}
+
 // testEnv encapsulates the warp server, test SMTP server, and hook for E2E tests.
 type testEnv struct {
 	ip       string
@@ -103,8 +124,8 @@ type testEnv struct {
 	hostname string
 	hook     *testHook
 	messages chan ReceivedMessage
-	warpLog  bytes.Buffer
-	smtpLog  bytes.Buffer
+	warpLog  syncBuffer
+	smtpLog  syncBuffer
 }
 
 var nextPort int32 = 20000

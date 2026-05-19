@@ -1,7 +1,6 @@
 package warp
 
 import (
-	"bytes"
 	"fmt"
 	"log"
 	"strings"
@@ -20,8 +19,8 @@ func TestIntegration(t *testing.T) {
 	hostname := "example.local"
 
 	var (
-		warpLog bytes.Buffer
-		smtpLog bytes.Buffer
+		warpLog syncBuffer
+		smtpLog syncBuffer
 	)
 
 	messages := make(chan ReceivedMessage, 1)
