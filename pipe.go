@@ -94,6 +94,14 @@ var (
 	mailToRegex         = regexp.MustCompile(rcptToRegex)
 	mailFromRegexStrict = regexp.MustCompile(mailRegexStrict)
 	mailToRegexStrict   = regexp.MustCompile(rcptToRegexStrict)
+
+	// Pre-computed byte slices for SMTP response codes and keywords used in
+	// hot-path classifier scans, so we don't pay an fmt.Sprint allocation
+	// on every chunk.
+	codeActionCompletedBytes   = []byte("250")
+	codeServiceReadyBytes      = []byte("220")
+	codeStartingMailInputBytes = []byte("354")
+	starttlsBytes              = []byte("STARTTLS")
 )
 
 func (e Elapse) String() string {
@@ -328,7 +336,11 @@ func sanitizeReply(reply string) string {
 func (p *Pipe) mediateOnDownstream(b []byte, i int) ([]byte, int, bool) {
 	data := b[0:i]
 
-	if p.isResponseOfEHLOWithStartTLS(b) {
+	// Classify the EHLO response once and reuse below to avoid scanning
+	// the buffer twice (once for "with STARTTLS", once for "without").
+	withStartTLS, withoutStartTLS := p.classifyEHLOResponse(b)
+
+	if withStartTLS {
 		go p.afterCommHook(data, dstToPxy)
 		b, i = p.removeStartTLSCommand(b, i)
 		data = b[0:i]
@@ -376,7 +388,7 @@ func (p *Pipe) mediateOnDownstream(b []byte, i int) ([]byte, int, bool) {
 		p.timeAtDataStarting = time.Now()
 	}
 
-	if p.isResponseOfEHLOWithoutStartTLS(b) {
+	if withoutStartTLS {
 		p.ehloResponseHandled = true
 		go p.afterCommHook(data, pxyToSrc)
 	} else {
@@ -611,22 +623,36 @@ func (p *Pipe) Close() {
 	go p.afterConnHook()
 }
 
-func (p *Pipe) isResponseOfEHLOWithStartTLS(b []byte) bool {
+// classifyEHLOResponse runs the shared bytes.Contains scans for the EHLO
+// response classifiers exactly once, returning whether the buffer looks
+// like an EHLO reply with or without STARTTLS. Connections that have
+// already entered TLS, are locked for handshake, or have already handled
+// the first EHLO response receive (false, false) without scanning.
+func (p *Pipe) classifyEHLOResponse(b []byte) (withStartTLS, withoutStartTLS bool) {
 	if p.tls || p.locked || p.ehloResponseHandled {
-		return false
+		return false, false
 	}
-	return bytes.Contains(b, []byte(fmt.Sprint(codeActionCompleted))) && bytes.Contains(b, []byte("STARTTLS"))
+	if !bytes.Contains(b, codeActionCompletedBytes) {
+		return false, false
+	}
+	if bytes.Contains(b, starttlsBytes) {
+		return true, false
+	}
+	return false, true
+}
+
+func (p *Pipe) isResponseOfEHLOWithStartTLS(b []byte) bool {
+	withStartTLS, _ := p.classifyEHLOResponse(b)
+	return withStartTLS
 }
 
 func (p *Pipe) isResponseOfEHLOWithoutStartTLS(b []byte) bool {
-	if p.tls || p.locked || p.ehloResponseHandled {
-		return false
-	}
-	return bytes.Contains(b, []byte(fmt.Sprint(codeActionCompleted))) && !bytes.Contains(b, []byte("STARTTLS"))
+	_, withoutStartTLS := p.classifyEHLOResponse(b)
+	return withoutStartTLS
 }
 
 func (p *Pipe) isResponseOfReadyToStartTLS(b []byte) bool {
-	return !p.tls && p.locked && bytes.Contains(b, []byte(fmt.Sprint(codeServiceReady)))
+	return !p.tls && p.locked && bytes.Contains(b, codeServiceReadyBytes)
 }
 
 func (p *Pipe) removeMailBody(b Data) Data {
