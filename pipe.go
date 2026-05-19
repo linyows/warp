@@ -141,6 +141,17 @@ func isRFCCompliant(match []byte, strictRegex *regexp.Regexp) bool {
 func (p *Pipe) mediateOnUpstream(b []byte, i int) ([]byte, int, bool) {
 	data := b[0:i]
 
+	// Fast path: once the DATA phase has been entered on a non-filter
+	// connection, every upstream chunk is mail body bytes — they cannot
+	// contain SMTP commands, so all command/regex scans must be skipped.
+	// Only the end-of-data terminator is checked to exit the phase.
+	if p.inDataPhase && p.beforeRelayHook == nil {
+		if bytes.Contains(data, dataTerminator) {
+			p.inDataPhase = false
+		}
+		return b, i, false
+	}
+
 	if !p.tls || p.rMailAddr == nil {
 		p.setSenderMailAddress(data)
 		p.setSenderServerName(data)
@@ -356,8 +367,14 @@ func (p *Pipe) mediateOnDownstream(b []byte, i int) ([]byte, int, bool) {
 		// Fall through to relay error response to client
 	}
 
-	// time before email input
-	p.setTimeAtDataStarting(b)
+	// Detect the server's 354 reply once to (a) record the data-phase start
+	// time and (b) enter the upstream fast path for non-filter connections.
+	// hasResponseCode still uses bytes.Split today (fixed in a later patch),
+	// but is gated by !inDataPhase so it runs at most a handful of times.
+	if !p.inDataPhase && p.beforeRelayHook == nil && p.hasResponseCode(b, codeStartingMailInput) {
+		p.inDataPhase = true
+		p.timeAtDataStarting = time.Now()
+	}
 
 	if p.isResponseOfEHLOWithoutStartTLS(b) {
 		p.ehloResponseHandled = true
@@ -367,15 +384,6 @@ func (p *Pipe) mediateOnDownstream(b []byte, i int) ([]byte, int, bool) {
 	}
 
 	return b, i, false
-}
-
-func (p *Pipe) setTimeAtDataStarting(b []byte) {
-	list := bytes.Split(b, []byte(crlf))
-	for _, v := range list {
-		if len(v) >= 3 && string(v[:3]) == fmt.Sprint(codeStartingMailInput) {
-			p.timeAtDataStarting = time.Now()
-		}
-	}
 }
 
 func (p *Pipe) Do() {

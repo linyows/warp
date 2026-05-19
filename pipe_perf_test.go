@@ -65,21 +65,6 @@ func buildMailBodyChunk(size int) []byte {
 // the input chunk size so `MB/s` throughput is also reported.
 // ─────────────────────────────────────────────────────────────────────
 
-// BenchmarkSetTimeAtDataStarting_LargeBuffer measures the cost of the
-// bytes.Split + [][]byte allocation that runs on EVERY downstream chunk,
-// including chunks that can never contain a 354 response code.
-func BenchmarkSetTimeAtDataStarting_LargeBuffer(b *testing.B) {
-	const size = 1024 * 1024
-	chunk := buildMailBodyChunk(size)
-	p := newPerfPipe()
-	b.SetBytes(int64(len(chunk)))
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		p.setTimeAtDataStarting(chunk)
-	}
-}
-
 // BenchmarkHasResponseCode_LargeBuffer measures bytes.Split inside
 // hasResponseCode against a large buffer.
 func BenchmarkHasResponseCode_LargeBuffer(b *testing.B) {
@@ -111,7 +96,7 @@ func BenchmarkIsResponseOfEHLOWithStartTLS_MailBody(b *testing.B) {
 // BenchmarkMediateOnDownstream_LargeBuffer measures the per-chunk cost of
 // mediateOnDownstream on a 1 MiB chunk. p.tls is forced to true so that the
 // removeStartTLSCommand path is suppressed; this isolates the scan-only cost
-// of the always-on classifiers and setTimeAtDataStarting.
+// of the always-on classifiers and the inline 354 detection.
 func BenchmarkMediateOnDownstream_LargeBuffer(b *testing.B) {
 	const size = 1024 * 1024
 	chunk := buildMailBodyChunk(size)
@@ -156,6 +141,26 @@ func BenchmarkMediateOnUpstream_DataBody_PlainSMTP(b *testing.B) {
 	chunk := buildMailBodyChunk(size)
 	p := newPerfPipe()
 	p.rMailAddr = []byte("bob@example.local")
+	buf := make([]byte, 0, len(chunk))
+	b.SetBytes(int64(len(chunk)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		buf = append(buf[:0], chunk...)
+		_, _, _ = p.mediateOnUpstream(buf, len(buf))
+	}
+}
+
+// BenchmarkMediateOnUpstream_InDataPhase represents the post-fix steady state
+// of upstream mediation for a non-filter connection: the proxy has observed
+// the server's 354 reply downstream, set inDataPhase=true, and every
+// subsequent upstream chunk is mail body bytes. The fast path bypasses all
+// command/regex scans and only looks for the end-of-data terminator.
+func BenchmarkMediateOnUpstream_InDataPhase(b *testing.B) {
+	const size = 1024 * 1024
+	chunk := buildMailBodyChunk(size)
+	p := newPerfPipe()
+	p.inDataPhase = true
 	buf := make([]byte, 0, len(chunk))
 	b.SetBytes(int64(len(chunk)))
 	b.ReportAllocs()
