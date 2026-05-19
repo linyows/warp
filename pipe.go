@@ -391,14 +391,18 @@ func (p *Pipe) mediateOnDownstream(b []byte, i int) ([]byte, int, bool) {
 
 	// Classify the EHLO response once and reuse below to avoid scanning
 	// the buffer twice (once for "with STARTTLS", once for "without").
-	withStartTLS, withoutStartTLS := p.classifyEHLOResponse(b)
+	// Classifiers MUST scan only the valid data window (data, not b) — the
+	// underlying buffer may extend past i, especially when it is shared
+	// across connections via sync.Pool and still contains bytes from a
+	// previous connection.
+	withStartTLS, withoutStartTLS := p.classifyEHLOResponse(data)
 
 	if withStartTLS {
 		go p.afterCommHook(data, dstToPxy)
-		b, i = p.removeStartTLSCommand(b, i)
+		b, i = p.removeStartTLSCommand(data, i)
 		data = b[0:i]
 		p.ehloResponseHandled = true
-	} else if p.isResponseOfReadyToStartTLS(b) {
+	} else if p.isResponseOfReadyToStartTLS(data) {
 		go p.afterCommHook(data, dstToPxy)
 		er := p.connectTLS()
 		if er != nil {
@@ -434,9 +438,9 @@ func (p *Pipe) mediateOnDownstream(b []byte, i int) ([]byte, int, bool) {
 
 	// Detect the server's 354 reply once to (a) record the data-phase start
 	// time and (b) enter the upstream fast path for non-filter connections.
-	// hasResponseCode still uses bytes.Split today (fixed in a later patch),
-	// but is gated by !inDataPhase so it runs at most a handful of times.
-	if !p.inDataPhase && p.beforeRelayHook == nil && p.hasResponseCode(b, codeStartingMailInput) {
+	// Scan only the valid data window (data, not b) — the buffer may carry
+	// stale bytes from a previous connection when it comes from the pool.
+	if !p.inDataPhase && p.beforeRelayHook == nil && p.hasResponseCode(data, codeStartingMailInput) {
 		p.inDataPhase = true
 		p.timeAtDataStarting = time.Now()
 	}
