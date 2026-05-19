@@ -134,30 +134,23 @@ func TestSetReceiverMailAddressAndServerName(t *testing.T) {
 }
 
 func TestIsResponseOfEHLOWithStartTLS(t *testing.T) {
-	pipe := &Pipe{
-		tls:    false,
-		locked: false,
-	}
+	// atomic.Bool zero-value is false; no explicit init needed.
+	pipe := &Pipe{}
 	if !pipe.isResponseOfEHLOWithStartTLS([]byte("250-example.test\r\n250-PIPELINING\r\n250-8BITMIME\r\n250-SIZE 41943040\r\n250 STARTTLS\r\n")) {
 		t.Errorf("expected true, but got false")
 	}
 }
 
 func TestIsResponseOfEHLOWithoutStartTLS(t *testing.T) {
-	pipe := &Pipe{
-		tls:    false,
-		locked: false,
-	}
+	pipe := &Pipe{}
 	if !pipe.isResponseOfEHLOWithoutStartTLS([]byte("250-example.test\r\n250-PIPELINING\r\n250-8BITMIME\r\n250 SIZE 41943040\r\n")) {
 		t.Errorf("expected true, but got false")
 	}
 }
 
 func TestIsResponseOfReadyToStartTLS(t *testing.T) {
-	pipe := &Pipe{
-		tls:    false,
-		locked: true,
-	}
+	pipe := &Pipe{}
+	pipe.locked.Store(true)
 	if !pipe.isResponseOfReadyToStartTLS([]byte("220 2.0.0 SMTP server ready\r\n")) {
 		t.Errorf("expected true, but got false")
 	}
@@ -195,7 +188,7 @@ func TestRemoveStartTLSCommand(t *testing.T) {
 	}
 
 	for _, v := range tests {
-		pipe := &Pipe{readytls: false, afterCommHook: func(b Data, to Direction) {}}
+		pipe := &Pipe{afterCommHook: func(b Data, to Direction) {}}
 		gotResp, gotSize := pipe.removeStartTLSCommand(v.ehloResp, v.ehloSize)
 		if string(v.expeResp) != string(gotResp) {
 			t.Errorf("response\nexpected:\n%sgot:\n%s", v.expeResp, gotResp)
@@ -203,8 +196,8 @@ func TestRemoveStartTLSCommand(t *testing.T) {
 		if v.expeSize != gotSize {
 			t.Errorf("size expected %#v got %#v", v.expeSize, gotSize)
 		}
-		if v.expeTLS != pipe.readytls {
-			t.Errorf("tls expected %#v got %#v", v.expeTLS, pipe.readytls)
+		if got := pipe.readytls.Load(); v.expeTLS != got {
+			t.Errorf("tls expected %#v got %#v", v.expeTLS, got)
 		}
 	}
 }
@@ -364,7 +357,7 @@ func newTestPipeWithConns(t *testing.T) (*Pipe, net.Conn, net.Conn) {
 
 func TestHandleDataPhaseUpstream_Relay(t *testing.T) {
 	p, _, rRemote := newTestPipeWithConns(t)
-	p.inDataPhase = true
+	p.inDataPhase.Store(true)
 	p.dataBuffer = &bytes.Buffer{}
 	p.sMailAddr = []byte("sender@example.test")
 	p.rMailAddr = []byte("rcpt@example.local")
@@ -400,7 +393,7 @@ func TestHandleDataPhaseUpstream_Relay(t *testing.T) {
 	if !isContinue {
 		t.Error("expected isContinue=true for Relay action")
 	}
-	if p.inDataPhase {
+	if p.inDataPhase.Load() {
 		t.Error("expected inDataPhase=false after handling")
 	}
 	if p.dataBuffer != nil {
@@ -441,7 +434,7 @@ func TestHandleDataPhaseUpstream_Relay(t *testing.T) {
 
 func TestHandleDataPhaseUpstream_Reject(t *testing.T) {
 	p, sRemote, _ := newTestPipeWithConns(t)
-	p.inDataPhase = true
+	p.inDataPhase.Store(true)
 	p.dataBuffer = &bytes.Buffer{}
 
 	p.beforeRelayHook = func(data *BeforeRelayData) *FilterResult {
@@ -488,7 +481,7 @@ func TestHandleDataPhaseUpstream_Reject(t *testing.T) {
 
 func TestHandleDataPhaseUpstream_AddHeader(t *testing.T) {
 	p, _, rRemote := newTestPipeWithConns(t)
-	p.inDataPhase = true
+	p.inDataPhase.Store(true)
 	p.dataBuffer = &bytes.Buffer{}
 
 	p.beforeRelayHook = func(data *BeforeRelayData) *FilterResult {
@@ -542,7 +535,7 @@ func TestHandleDataPhaseUpstream_AddHeader(t *testing.T) {
 
 func TestHandleDataPhaseUpstream_Buffering(t *testing.T) {
 	p, _, _ := newTestPipeWithConns(t)
-	p.inDataPhase = true
+	p.inDataPhase.Store(true)
 	p.dataBuffer = &bytes.Buffer{}
 	p.beforeRelayHook = func(data *BeforeRelayData) *FilterResult {
 		return &FilterResult{Action: FilterRelay}
@@ -557,7 +550,7 @@ func TestHandleDataPhaseUpstream_Buffering(t *testing.T) {
 	if !isContinue {
 		t.Error("expected isContinue=true for incomplete data")
 	}
-	if !p.inDataPhase {
+	if !p.inDataPhase.Load() {
 		t.Error("should still be in DATA phase after incomplete chunk")
 	}
 	if p.dataBuffer == nil {
@@ -570,7 +563,7 @@ func TestHandleDataPhaseUpstream_Buffering(t *testing.T) {
 
 func TestHandleDataPhaseUpstream_BufferOverflow(t *testing.T) {
 	p, sRemote, _ := newTestPipeWithConns(t)
-	p.inDataPhase = true
+	p.inDataPhase.Store(true)
 	p.dataBuffer = &bytes.Buffer{}
 	p.dataBufferSize = 50 // Small limit
 	p.beforeRelayHook = func(data *BeforeRelayData) *FilterResult {
@@ -603,7 +596,7 @@ func TestHandleDataPhaseUpstream_BufferOverflow(t *testing.T) {
 	if !isContinue {
 		t.Error("expected isContinue=true on buffer overflow")
 	}
-	if p.inDataPhase {
+	if p.inDataPhase.Load() {
 		t.Error("expected inDataPhase=false after overflow with terminator in chunk")
 	}
 	if p.dataBuffer != nil {
@@ -623,7 +616,7 @@ func TestHandleDataPhaseUpstream_BufferOverflow(t *testing.T) {
 
 func TestHandleDataPhaseUpstream_BufferOverflowDiscardMode(t *testing.T) {
 	p, sRemote, _ := newTestPipeWithConns(t)
-	p.inDataPhase = true
+	p.inDataPhase.Store(true)
 	p.dataBuffer = &bytes.Buffer{}
 	p.dataBufferSize = 50 // Small limit
 	p.beforeRelayHook = func(data *BeforeRelayData) *FilterResult {
@@ -655,7 +648,7 @@ func TestHandleDataPhaseUpstream_BufferOverflowDiscardMode(t *testing.T) {
 	if !p.discardingData {
 		t.Error("expected discardingData=true when terminator not in overflow chunk")
 	}
-	if !p.inDataPhase {
+	if !p.inDataPhase.Load() {
 		t.Error("expected inDataPhase=true while discarding (waiting for terminator)")
 	}
 
@@ -682,7 +675,7 @@ func TestHandleDataPhaseUpstream_BufferOverflowDiscardMode(t *testing.T) {
 	if p.discardingData {
 		t.Error("expected discardingData=false after terminator")
 	}
-	if p.inDataPhase {
+	if p.inDataPhase.Load() {
 		t.Error("expected inDataPhase=false after terminator in discard mode")
 	}
 }
@@ -716,7 +709,7 @@ func TestMediateOnUpstream_FilterHookDataCommand(t *testing.T) {
 	if !isContinue {
 		t.Error("DATA command should be suppressed (isContinue=true) with filter hook")
 	}
-	if !p.inDataPhase {
+	if !p.inDataPhase.Load() {
 		t.Error("inDataPhase should be true after DATA command interception")
 	}
 	if p.dataBuffer == nil {
@@ -744,14 +737,14 @@ func TestMediateOnUpstream_NoFilterHookBypass(t *testing.T) {
 	if isContinue {
 		t.Error("without filter hook, should not suppress relay")
 	}
-	if p.inDataPhase {
+	if p.inDataPhase.Load() {
 		t.Error("inDataPhase should remain false without filter hook")
 	}
 }
 
 func TestMediateOnUpstream_DelegatesInDataPhase(t *testing.T) {
 	p, _, rRemote := newTestPipeWithConns(t)
-	p.inDataPhase = true
+	p.inDataPhase.Store(true)
 	p.dataBuffer = &bytes.Buffer{}
 
 	hookCalled := false
@@ -874,7 +867,7 @@ func TestMediateOnUpstream_MetadataExtractionWithFilterHook(t *testing.T) {
 
 func TestHandleDataPhaseUpstream_NilResult(t *testing.T) {
 	p, _, rRemote := newTestPipeWithConns(t)
-	p.inDataPhase = true
+	p.inDataPhase.Store(true)
 	p.dataBuffer = &bytes.Buffer{}
 
 	// Hook returns nil — should fallback to FilterRelay (store message, send DATA to server)
@@ -918,7 +911,7 @@ func TestHandleDataPhaseUpstream_NilResult(t *testing.T) {
 
 func TestHandleDataPhaseUpstream_UnknownAction(t *testing.T) {
 	p, _, rRemote := newTestPipeWithConns(t)
-	p.inDataPhase = true
+	p.inDataPhase.Store(true)
 	p.dataBuffer = &bytes.Buffer{}
 
 	// Hook returns unknown action — should fallback to FilterRelay
@@ -961,7 +954,7 @@ func TestHandleDataPhaseUpstream_UnknownAction(t *testing.T) {
 
 func TestHandleDataPhaseUpstream_RejectSanitizesReply(t *testing.T) {
 	p, sRemote, _ := newTestPipeWithConns(t)
-	p.inDataPhase = true
+	p.inDataPhase.Store(true)
 	p.dataBuffer = &bytes.Buffer{}
 
 	// Hook returns reply with CRLF injection attempt

@@ -101,7 +101,7 @@ func BenchmarkMediateOnDownstream_LargeBuffer(b *testing.B) {
 	const size = 1024 * 1024
 	chunk := buildMailBodyChunk(size)
 	p := newPerfPipe()
-	p.tls = true
+	p.tls.Store(true)
 	buf := make([]byte, 0, len(chunk))
 	b.SetBytes(int64(len(chunk)))
 	b.ReportAllocs()
@@ -160,7 +160,7 @@ func BenchmarkMediateOnUpstream_InDataPhase(b *testing.B) {
 	const size = 1024 * 1024
 	chunk := buildMailBodyChunk(size)
 	p := newPerfPipe()
-	p.inDataPhase = true
+	p.inDataPhase.Store(true)
 	buf := make([]byte, 0, len(chunk))
 	b.SetBytes(int64(len(chunk)))
 	b.ReportAllocs()
@@ -194,7 +194,7 @@ func BenchmarkMediateOnUpstream_DataBody_NoRcptSet(b *testing.B) {
 func BenchmarkMediateOnDownstream_EHLOResponse(b *testing.B) {
 	chunk := buildEHLOResponseChunk()
 	p := newPerfPipe()
-	p.tls = true // suppress STARTTLS path; we want the scan cost only
+	p.tls.Store(true) // suppress STARTTLS path; we want the scan cost only
 	buf := make([]byte, 0, len(chunk))
 	b.SetBytes(int64(len(chunk)))
 	b.ReportAllocs()
@@ -231,10 +231,10 @@ func TestMediateOnDownstream_RemoveStartTLSNoMisfireAfterEHLO(t *testing.T) {
 	ehloBuf := make([]byte, len(ehlo))
 	copy(ehloBuf, ehlo)
 	_, _, _ = p.mediateOnDownstream(ehloBuf, len(ehloBuf))
-	if !p.readytls {
+	if !p.readytls.Load() {
 		t.Fatalf("expected p.readytls=true after handling a real EHLO STARTTLS response, got false")
 	}
-	if !p.ehloResponseHandled {
+	if !p.ehloResponseHandled.Load() {
 		t.Fatalf("expected ehloResponseHandled=true after first EHLO response, got false")
 	}
 
@@ -254,12 +254,12 @@ func TestMediateOnDownstream_RemoveStartTLSNoMisfireAfterEHLO(t *testing.T) {
 	}
 
 	// Reset p.readytls so we can assert mediateOnDownstream does NOT set it.
-	p.readytls = false
+	p.readytls.Store(false)
 	bodyBuf := make([]byte, len(body))
 	copy(bodyBuf, body)
 	_, _, _ = p.mediateOnDownstream(bodyBuf, len(bodyBuf))
 
-	if p.readytls {
+	if p.readytls.Load() {
 		t.Fatalf("expected p.readytls=false after mail-body chunk; got true (misfire regression)")
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -25,19 +26,23 @@ type Pipe struct {
 	sServerName []byte
 	rServerName []byte
 
-	tls      bool
-	readytls bool
-	locked   bool
+	// Boolean state flags shared between the upstream and downstream
+	// copy goroutines. They are atomic.Bool so that reads on one side and
+	// writes on the other are race-free under -race (and have well-defined
+	// happens-before semantics under the Go memory model).
+	tls      atomic.Bool
+	readytls atomic.Bool
+	locked   atomic.Bool
 	blocker  chan interface{}
 
-	isWaitedStarttlsRes bool
-	isHeaderRemoved     bool
+	isWaitedStarttlsRes atomic.Bool
+	isHeaderRemoved     atomic.Bool
 
 	// ehloResponseHandled latches once the first EHLO response (with or
 	// without STARTTLS) has been classified, so that later downstream
 	// chunks — including mail-body bytes that happen to contain "250" and
 	// "STARTTLS" — cannot retrigger removeStartTLSCommand.
-	ehloResponseHandled bool
+	ehloResponseHandled atomic.Bool
 
 	timeAtConnected    time.Time
 	timeAtDataStarting time.Time
@@ -45,13 +50,15 @@ type Pipe struct {
 	afterCommHook func(Data, Direction)
 	afterConnHook func()
 
-	// DATA phase buffering for filter hooks
-	inDataPhase        bool
-	dataBuffer         *bytes.Buffer
-	dataBufferSize     int
-	discardingData     bool     // discard remaining client data after buffer overflow
-	pendingRelayMessage []byte  // buffered message waiting for server 354 after filter approval
-	senderIP           string
+	// DATA phase buffering for filter hooks. inDataPhase is shared between
+	// upstream (sets it on DATA command or terminator) and downstream (sets
+	// it on the server's 354 reply); discardingData is upstream-only.
+	inDataPhase         atomic.Bool
+	dataBuffer          *bytes.Buffer
+	dataBufferSize      int
+	discardingData      bool   // discard remaining client data after buffer overflow
+	pendingRelayMessage []byte // buffered message waiting for server 354 after filter approval
+	senderIP            string
 
 	// Filter hook (nil if no FilterHook registered)
 	beforeRelayHook func(*BeforeRelayData) *FilterResult
@@ -202,14 +209,14 @@ func (p *Pipe) mediateOnUpstream(b []byte, i int) ([]byte, int, bool) {
 	// connection, every upstream chunk is mail body bytes — they cannot
 	// contain SMTP commands, so all command/regex scans must be skipped.
 	// Only the end-of-data terminator is checked to exit the phase.
-	if p.inDataPhase && p.beforeRelayHook == nil {
+	if p.inDataPhase.Load() && p.beforeRelayHook == nil {
 		if bytes.Contains(data, dataTerminator) {
-			p.inDataPhase = false
+			p.inDataPhase.Store(false)
 		}
 		return b, i, false
 	}
 
-	if !p.tls || p.rMailAddr == nil {
+	if !p.tls.Load() || p.rMailAddr == nil {
 		p.setSenderMailAddress(data)
 		p.setSenderServerName(data)
 		p.setReceiverMailAddressAndServerName(data)
@@ -217,13 +224,13 @@ func (p *Pipe) mediateOnUpstream(b []byte, i int) ([]byte, int, bool) {
 
 	// FilterHook: DATA phase buffering
 	if p.beforeRelayHook != nil {
-		if p.inDataPhase {
+		if p.inDataPhase.Load() {
 			return p.handleDataPhaseUpstream(b, i)
 		}
 		if p.isDataCommand(data) {
 			// Don't relay DATA to server; send fake 354 to client
 			_, _ = p.sConn.Write([]byte("354 Start mail input" + crlf))
-			p.inDataPhase = true
+			p.inDataPhase.Store(true)
 			p.dataBuffer = &bytes.Buffer{}
 			p.timeAtDataStarting = time.Now()
 			go p.afterCommHook(dupData(data), srcToPxy)
@@ -232,22 +239,22 @@ func (p *Pipe) mediateOnUpstream(b []byte, i int) ([]byte, int, bool) {
 		}
 	}
 
-	if !p.tls && p.readytls {
-		p.locked = true
+	if !p.tls.Load() && p.readytls.Load() {
+		p.locked.Store(true)
 		er := p.starttls()
-		p.isWaitedStarttlsRes = true
+		p.isWaitedStarttlsRes.Store(true)
 		if er != nil {
 			go p.afterCommHook([]byte(fmt.Sprintf("starttls error: %s", er.Error())), pxyToDst)
 		}
-		p.readytls = false
+		p.readytls.Store(false)
 		go p.afterCommHook(dupData(data), srcToPxy)
 	}
 
-	if p.locked {
+	if p.locked.Load() {
 		p.waitForTLSConn(b, i)
 		go p.afterCommHook(dupData(data), pxyToDst)
 	} else {
-		if !p.isHeaderRemoved {
+		if !p.isHeaderRemoved.Load() {
 			go p.afterCommHook(dupData(p.removeMailBody(data)), srcToDst)
 		}
 	}
@@ -274,7 +281,7 @@ func (p *Pipe) handleDataPhaseUpstream(b []byte, i int) ([]byte, int, bool) {
 	// Discard mode: consume remaining client data after buffer overflow until terminator
 	if p.discardingData {
 		if bytes.Contains(data, dataTerminator) {
-			p.inDataPhase = false
+			p.inDataPhase.Store(false)
 			p.discardingData = false
 		}
 		return b, i, true
@@ -289,7 +296,7 @@ func (p *Pipe) handleDataPhaseUpstream(b []byte, i int) ([]byte, int, bool) {
 		go p.afterCommHook([]byte("filter buffer overflow"), onPxy)
 		// Check if terminator is in current chunk
 		if bytes.Contains(data, dataTerminator) {
-			p.inDataPhase = false
+			p.inDataPhase.Store(false)
 			p.discardingData = false
 		}
 		return b, i, true
@@ -325,7 +332,7 @@ func (p *Pipe) handleDataPhaseUpstream(b []byte, i int) ([]byte, int, bool) {
 		result = &FilterResult{Action: FilterRelay}
 	}
 
-	p.inDataPhase = false
+	p.inDataPhase.Store(false)
 	p.dataBuffer = nil
 
 	switch result.Action {
@@ -416,7 +423,7 @@ func (p *Pipe) mediateOnDownstream(b []byte, i int) ([]byte, int, bool) {
 		go p.afterCommHook(dupData(data), dstToPxy)
 		b, i = p.removeStartTLSCommand(data, i)
 		data = b[0:i]
-		p.ehloResponseHandled = true
+		p.ehloResponseHandled.Store(true)
 	} else if p.isResponseOfReadyToStartTLS(data) {
 		go p.afterCommHook(dupData(data), dstToPxy)
 		er := p.connectTLS()
@@ -426,8 +433,8 @@ func (p *Pipe) mediateOnDownstream(b []byte, i int) ([]byte, int, bool) {
 	}
 
 	// remove buffering "220 2.0.0 Ready to start TLS" response
-	if p.isWaitedStarttlsRes {
-		p.isWaitedStarttlsRes = false
+	if p.isWaitedStarttlsRes.Load() {
+		p.isWaitedStarttlsRes.Store(false)
 		return b, i, true
 	}
 
@@ -455,13 +462,13 @@ func (p *Pipe) mediateOnDownstream(b []byte, i int) ([]byte, int, bool) {
 	// time and (b) enter the upstream fast path for non-filter connections.
 	// Scan only the valid data window (data, not b) — the buffer may carry
 	// stale bytes from a previous connection when it comes from the pool.
-	if !p.inDataPhase && p.beforeRelayHook == nil && p.hasResponseCode(data, codeStartingMailInput) {
-		p.inDataPhase = true
+	if !p.inDataPhase.Load() && p.beforeRelayHook == nil && p.hasResponseCode(data, codeStartingMailInput) {
+		p.inDataPhase.Store(true)
 		p.timeAtDataStarting = time.Now()
 	}
 
 	if withoutStartTLS {
-		p.ehloResponseHandled = true
+		p.ehloResponseHandled.Store(true)
 		go p.afterCommHook(dupData(data), pxyToSrc)
 	} else {
 		go p.afterCommHook(dupData(data), dstToSrc)
@@ -610,7 +617,9 @@ func (p *Pipe) copy(dr Flow, fn Mediator) (written int64, err error) {
 		// Only block upstream while pipe is locked for TLS negotiation.
 		// Downstream must continue reading to receive the server's "220 Ready"
 		// response and complete the TLS handshake via connectTLS().
-		if p.locked && dr == upstream {
+		// Reorder so the downstream goroutine never reads p.locked (race-free
+		// short-circuit when dr != upstream).
+		if dr == upstream && p.locked.Load() {
 			continue
 		}
 
@@ -678,7 +687,7 @@ func (p *Pipe) waitForTLSConn(b []byte, i int) {
 	go p.afterCommHook([]byte("pipe locked for tls connection"), onPxy)
 	<-p.blocker
 	go p.afterCommHook([]byte("tls connected, to pipe unlocked"), onPxy)
-	p.locked = false
+	p.locked.Store(false)
 }
 
 func (p *Pipe) connectTLS() error {
@@ -697,7 +706,7 @@ func (p *Pipe) connectTLS() error {
 		return err
 	}
 
-	p.tls = true
+	p.tls.Store(true)
 	p.blocker <- false
 
 	return nil
@@ -720,7 +729,7 @@ func (p *Pipe) Close() {
 // already entered TLS, are locked for handshake, or have already handled
 // the first EHLO response receive (false, false) without scanning.
 func (p *Pipe) classifyEHLOResponse(b []byte) (withStartTLS, withoutStartTLS bool) {
-	if p.tls || p.locked || p.ehloResponseHandled {
+	if p.tls.Load() || p.locked.Load() || p.ehloResponseHandled.Load() {
 		return false, false
 	}
 	if !bytes.Contains(b, codeActionCompletedBytes) {
@@ -743,7 +752,7 @@ func (p *Pipe) isResponseOfEHLOWithoutStartTLS(b []byte) bool {
 }
 
 func (p *Pipe) isResponseOfReadyToStartTLS(b []byte) bool {
-	return !p.tls && p.locked && bytes.Contains(b, codeServiceReadyBytes)
+	return !p.tls.Load() && p.locked.Load() && bytes.Contains(b, codeServiceReadyBytes)
 }
 
 func (p *Pipe) removeMailBody(b Data) Data {
@@ -751,7 +760,7 @@ func (p *Pipe) removeMailBody(b Data) Data {
 	if i == -1 {
 		return b
 	}
-	p.isHeaderRemoved = true
+	p.isHeaderRemoved.Store(true)
 	return b[:i]
 }
 
@@ -763,7 +772,7 @@ func (p *Pipe) removeStartTLSCommand(b []byte, i int) ([]byte, int) {
 		old := []byte(lastLine)
 		b = bytes.Replace(b, old, []byte(""), 1)
 		i = i - len(old)
-		p.readytls = true
+		p.readytls.Store(true)
 
 		arr := strings.Split(string(b), crlf)
 		num := len(arr) - 2
@@ -774,7 +783,7 @@ func (p *Pipe) removeStartTLSCommand(b []byte, i int) ([]byte, int) {
 		old := []byte(intermediateLine)
 		b = bytes.Replace(b, old, []byte(""), 1)
 		i = i - len(old)
-		p.readytls = true
+		p.readytls.Store(true)
 
 	} else {
 		go p.afterCommHook([]byte("starttls replace error"), dstToPxy)
