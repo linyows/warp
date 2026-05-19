@@ -9,6 +9,7 @@ import (
 	"net"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -102,7 +103,40 @@ var (
 	codeServiceReadyBytes      = []byte("220")
 	codeStartingMailInputBytes = []byte("354")
 	starttlsBytes              = []byte("STARTTLS")
+
+	// copyBufPool recycles the per-direction read buffer used by Pipe.copy.
+	// Each connection previously made(`[]byte, p.bufferSize`) twice
+	// (upstream + downstream); with a default bufferSize of 10 MiB that is
+	// 20 MiB of fresh allocation per connection, which dominates the
+	// allocation profile under load.
+	copyBufPool sync.Pool
 )
+
+// acquireCopyBuf returns a *[]byte from the pool with len == size. If the
+// pool is empty or the pooled entry is too small, a fresh slice is created.
+func acquireCopyBuf(size int) *[]byte {
+	if v := copyBufPool.Get(); v != nil {
+		bp := v.(*[]byte)
+		if cap(*bp) >= size {
+			*bp = (*bp)[:size]
+			return bp
+		}
+		// Pooled buffer was smaller than requested; drop it (let GC) and
+		// allocate a fresh one. The replacement will be pooled on release.
+	}
+	nb := make([]byte, size)
+	return &nb
+}
+
+// releaseCopyBuf returns a buffer to the pool, restoring its slice header
+// to its full capacity so the next caller can resize freely.
+func releaseCopyBuf(bp *[]byte) {
+	if bp == nil {
+		return
+	}
+	*bp = (*bp)[:cap(*bp)]
+	copyBufPool.Put(bp)
+}
 
 func (e Elapse) String() string {
 	return fmt.Sprintf("%d msec", e)
@@ -532,7 +566,15 @@ func (p *Pipe) copy(dr Flow, fn Mediator) (written int64, err error) {
 		}
 		go p.afterCommHook([]byte(fmt.Sprintf("io.Reader size: %d", size)), onPxy)
 	}
-	buf := make([]byte, p.bufferSize)
+
+	// Acquire the per-direction read buffer from a sync.Pool so it can be
+	// reused across connections. origBuf retains the underlying array; the
+	// per-iteration buf is reset to origBuf before each Read so that a
+	// mediator returning a smaller/different slice (e.g. removeStartTLSCommand
+	// via bytes.Replace) does not shrink the buffer used by the next Read.
+	bufp := acquireCopyBuf(size)
+	defer releaseCopyBuf(bufp)
+	origBuf := *bufp
 
 	for {
 		var isContinue bool
@@ -543,6 +585,7 @@ func (p *Pipe) copy(dr Flow, fn Mediator) (written int64, err error) {
 			continue
 		}
 
+		buf := origBuf
 		nr, er := p.src(dr).Read(buf)
 		if nr > 0 {
 			// Run the Mediator!
