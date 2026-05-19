@@ -138,6 +138,21 @@ func releaseCopyBuf(bp *[]byte) {
 	copyBufPool.Put(bp)
 }
 
+// dupData returns an independent copy of b. afterCommHook is invoked
+// asynchronously via `go p.afterCommHook(...)`; its byte-slice arguments
+// must not alias the per-direction read buffer, because Pipe.copy reuses
+// that buffer on every iteration (and the buffer itself is now shared
+// across connections via sync.Pool). Without this defensive copy the
+// async hook can read the same array that the next Read is writing into.
+func dupData(b []byte) []byte {
+	if len(b) == 0 {
+		return nil
+	}
+	c := make([]byte, len(b))
+	copy(c, b)
+	return c
+}
+
 func (e Elapse) String() string {
 	return fmt.Sprintf("%d msec", e)
 }
@@ -211,7 +226,7 @@ func (p *Pipe) mediateOnUpstream(b []byte, i int) ([]byte, int, bool) {
 			p.inDataPhase = true
 			p.dataBuffer = &bytes.Buffer{}
 			p.timeAtDataStarting = time.Now()
-			go p.afterCommHook(data, srcToPxy)
+			go p.afterCommHook(dupData(data), srcToPxy)
 			go p.afterCommHook([]byte("354 Start mail input"), pxyToSrc)
 			return b, i, true // Suppress relay to server
 		}
@@ -225,15 +240,15 @@ func (p *Pipe) mediateOnUpstream(b []byte, i int) ([]byte, int, bool) {
 			go p.afterCommHook([]byte(fmt.Sprintf("starttls error: %s", er.Error())), pxyToDst)
 		}
 		p.readytls = false
-		go p.afterCommHook(data, srcToPxy)
+		go p.afterCommHook(dupData(data), srcToPxy)
 	}
 
 	if p.locked {
 		p.waitForTLSConn(b, i)
-		go p.afterCommHook(data, pxyToDst)
+		go p.afterCommHook(dupData(data), pxyToDst)
 	} else {
 		if !p.isHeaderRemoved {
-			go p.afterCommHook(p.removeMailBody(data), srcToDst)
+			go p.afterCommHook(dupData(p.removeMailBody(data)), srcToDst)
 		}
 	}
 
@@ -398,12 +413,12 @@ func (p *Pipe) mediateOnDownstream(b []byte, i int) ([]byte, int, bool) {
 	withStartTLS, withoutStartTLS := p.classifyEHLOResponse(data)
 
 	if withStartTLS {
-		go p.afterCommHook(data, dstToPxy)
+		go p.afterCommHook(dupData(data), dstToPxy)
 		b, i = p.removeStartTLSCommand(data, i)
 		data = b[0:i]
 		p.ehloResponseHandled = true
 	} else if p.isResponseOfReadyToStartTLS(data) {
-		go p.afterCommHook(data, dstToPxy)
+		go p.afterCommHook(dupData(data), dstToPxy)
 		er := p.connectTLS()
 		if er != nil {
 			go p.afterCommHook([]byte(fmt.Sprintf("TLS connection error: %s", er.Error())), dstToPxy)
@@ -447,9 +462,9 @@ func (p *Pipe) mediateOnDownstream(b []byte, i int) ([]byte, int, bool) {
 
 	if withoutStartTLS {
 		p.ehloResponseHandled = true
-		go p.afterCommHook(data, pxyToSrc)
+		go p.afterCommHook(dupData(data), pxyToSrc)
 	} else {
-		go p.afterCommHook(data, dstToSrc)
+		go p.afterCommHook(dupData(data), dstToSrc)
 	}
 
 	return b, i, false
