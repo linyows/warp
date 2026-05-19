@@ -302,19 +302,38 @@ func (p *Pipe) handleDataPhaseUpstream(b []byte, i int) ([]byte, int, bool) {
 	return b, i, true
 }
 
-// hasResponseCode checks if any line in b starts with the given 3-digit SMTP response code.
-// Matches "CODE " or "CODE-" (multi-line) at line start per RFC 5321.
+// hasResponseCode checks if any line in b starts with the given 3-digit SMTP
+// response code. Matches "CODE " or "CODE-" (multi-line) at line start per
+// RFC 5321. Implemented as an IndexByte loop so it allocates nothing and
+// only scans the buffer once.
 func (p *Pipe) hasResponseCode(b []byte, code int) bool {
-	codeStr := fmt.Sprint(code)
-	for _, line := range bytes.Split(b, []byte("\n")) {
-		line = bytes.TrimRight(line, "\r")
-		if len(line) < 3 {
+	// Encode code as 3 ASCII digits without going through fmt.Sprint.
+	if code < 100 || code > 999 {
+		return false
+	}
+	d0 := byte('0' + code/100)
+	d1 := byte('0' + (code/10)%10)
+	d2 := byte('0' + code%10)
+
+	for start := 0; start < len(b); {
+		// Locate end of current line.
+		nl := bytes.IndexByte(b[start:], '\n')
+		var line []byte
+		if nl < 0 {
+			line = b[start:]
+			start = len(b)
+		} else {
+			line = b[start : start+nl]
+			start += nl + 1
+		}
+		// Strip a trailing CR if present (without allocating).
+		if len(line) > 0 && line[len(line)-1] == '\r' {
+			line = line[:len(line)-1]
+		}
+		if len(line) < 3 || line[0] != d0 || line[1] != d1 || line[2] != d2 {
 			continue
 		}
-		if string(line[:3]) != codeStr {
-			continue
-		}
-		// Exact 3-char line, or followed by space/hyphen (RFC 5321 reply format)
+		// Exact 3-char line, or followed by space/hyphen (RFC 5321 reply format).
 		if len(line) == 3 || line[3] == ' ' || line[3] == '-' {
 			return true
 		}
