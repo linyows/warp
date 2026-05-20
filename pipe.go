@@ -53,10 +53,19 @@ type Pipe struct {
 	// DATA phase buffering for filter hooks. inDataPhase is shared between
 	// upstream (sets it on DATA command or terminator) and downstream (sets
 	// it on the server's 354 reply); discardingData is upstream-only.
-	inDataPhase         atomic.Bool
-	dataBuffer          *bytes.Buffer
-	dataBufferSize      int
-	discardingData      bool   // discard remaining client data after buffer overflow
+	inDataPhase    atomic.Bool
+	dataBuffer     *bytes.Buffer
+	dataBufferSize int
+	discardingData bool // discard remaining client data after buffer overflow
+
+	// Non-filter DATA-phase fast-path state. The end-of-data terminator
+	// "\r\n.\r\n" may straddle a TCP read boundary, so detectDataTerminator
+	// keeps the last (len(dataTerminator)-1) bytes of the previous chunk
+	// here and joins them with the prefix of the next chunk before
+	// scanning. Both fields are upstream-goroutine-only and need no sync.
+	upDataTail     [dataTerminatorTailLen]byte
+	upDataTailFill int
+
 	pendingRelayMessage []byte // buffered message waiting for server 354 after filter approval
 	senderIP            string
 
@@ -208,9 +217,10 @@ func (p *Pipe) mediateOnUpstream(b []byte, i int) ([]byte, int, bool) {
 	// Fast path: once the DATA phase has been entered on a non-filter
 	// connection, every upstream chunk is mail body bytes — they cannot
 	// contain SMTP commands, so all command/regex scans must be skipped.
-	// Only the end-of-data terminator is checked to exit the phase.
+	// detectDataTerminator handles the "\r\n.\r\n" marker even when it
+	// straddles a TCP read boundary by carrying a small tail across calls.
 	if p.inDataPhase.Load() && p.beforeRelayHook == nil {
-		if bytes.Contains(data, dataTerminator) {
+		if p.detectDataTerminator(data) {
 			p.inDataPhase.Store(false)
 		}
 		return b, i, false
@@ -273,6 +283,68 @@ func (p *Pipe) isDataCommand(data []byte) bool {
 
 // dataTerminator is the SMTP end-of-data marker.
 var dataTerminator = []byte("\r\n.\r\n")
+
+// dataTerminatorTailLen is len(dataTerminator)-1: the maximum number of
+// bytes from the previous chunk that we need to keep around in order to
+// detect a terminator that straddles a TCP read boundary.
+const dataTerminatorTailLen = 4
+
+// detectDataTerminator reports whether dataTerminator appears in the
+// current chunk or across the boundary with the previous chunk. It
+// updates p.upDataTail / p.upDataTailFill so the next call can keep
+// scanning across read boundaries.
+//
+// Called only from the upstream goroutine while inDataPhase is true and
+// no FilterHook is registered; the tail fields are accessed by no other
+// goroutine and therefore need no synchronisation.
+func (p *Pipe) detectDataTerminator(data []byte) bool {
+	if len(data) == 0 {
+		return false
+	}
+
+	// First, check the boundary region: prev tail + leading bytes of the
+	// new chunk. A stack-allocated 8-byte buffer fits the worst case
+	// (4 carried bytes + up to 4 new bytes), which is enough to contain
+	// any straddling 5-byte terminator.
+	if p.upDataTailFill > 0 {
+		var boundary [dataTerminatorTailLen * 2]byte
+		n := copy(boundary[:], p.upDataTail[:p.upDataTailFill])
+		take := dataTerminatorTailLen
+		if take > len(data) {
+			take = len(data)
+		}
+		n += copy(boundary[n:], data[:take])
+		if bytes.Contains(boundary[:n], dataTerminator) {
+			p.upDataTailFill = 0
+			return true
+		}
+	}
+
+	// Then check inside the new chunk in one pass.
+	if bytes.Contains(data, dataTerminator) {
+		p.upDataTailFill = 0
+		return true
+	}
+
+	// Save the last dataTerminatorTailLen bytes of the combined stream so
+	// the next call can resume across the next boundary.
+	if len(data) >= dataTerminatorTailLen {
+		copy(p.upDataTail[:], data[len(data)-dataTerminatorTailLen:])
+		p.upDataTailFill = dataTerminatorTailLen
+	} else {
+		keep := dataTerminatorTailLen - len(data)
+		if keep > p.upDataTailFill {
+			keep = p.upDataTailFill
+		}
+		if keep > 0 {
+			// Shift the kept bytes of the existing tail to the front.
+			copy(p.upDataTail[:keep], p.upDataTail[p.upDataTailFill-keep:p.upDataTailFill])
+		}
+		copy(p.upDataTail[keep:], data)
+		p.upDataTailFill = keep + len(data)
+	}
+	return false
+}
 
 // handleDataPhaseUpstream buffers client data during DATA phase and invokes filter hook.
 func (p *Pipe) handleDataPhaseUpstream(b []byte, i int) ([]byte, int, bool) {

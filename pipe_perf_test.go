@@ -263,3 +263,75 @@ func TestMediateOnDownstream_RemoveStartTLSNoMisfireAfterEHLO(t *testing.T) {
 		t.Fatalf("expected p.readytls=false after mail-body chunk; got true (misfire regression)")
 	}
 }
+
+// TestDetectDataTerminator_SplitAcrossChunks verifies that the upstream
+// fast-path terminator detector finds "\r\n.\r\n" even when it straddles
+// a TCP read boundary. Without the tail carry-over, a chunk pair like
+// ("...body\r\n.", "\r\n") would leave inDataPhase=true forever and
+// cause subsequent SMTP commands to be relayed as body bytes.
+func TestDetectDataTerminator_SplitAcrossChunks(t *testing.T) {
+	tests := []struct {
+		name   string
+		chunks [][]byte
+	}{
+		{
+			name:   "single chunk",
+			chunks: [][]byte{[]byte("body bytes\r\n.\r\n")},
+		},
+		{
+			name:   "split after first CR",
+			chunks: [][]byte{[]byte("body bytes\r"), []byte("\n.\r\n")},
+		},
+		{
+			name:   "split after first LF",
+			chunks: [][]byte{[]byte("body bytes\r\n"), []byte(".\r\n")},
+		},
+		{
+			name:   "split after dot",
+			chunks: [][]byte{[]byte("body bytes\r\n."), []byte("\r\n")},
+		},
+		{
+			name:   "split after trailing CR",
+			chunks: [][]byte{[]byte("body bytes\r\n.\r"), []byte("\n")},
+		},
+		{
+			name:   "each byte of terminator in its own chunk",
+			chunks: [][]byte{[]byte("body bytes"), []byte("\r"), []byte("\n"), []byte("."), []byte("\r"), []byte("\n")},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p := newPerfPipe()
+			var found bool
+			for _, ch := range tc.chunks {
+				if p.detectDataTerminator(ch) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("terminator not detected across chunks %v", tc.chunks)
+			}
+		})
+	}
+}
+
+// TestDetectDataTerminator_NoFalsePositive ensures the detector does not
+// trip on body bytes that merely contain individual terminator characters
+// without forming the full "\r\n.\r\n" sequence.
+func TestDetectDataTerminator_NoFalsePositive(t *testing.T) {
+	p := newPerfPipe()
+	// Body containing dots, CRLFs, and ".." (dot-stuffed) lines but never
+	// the literal "\r\n.\r\n" terminator.
+	chunks := [][]byte{
+		[]byte("Line one with a period.\r\n"),
+		[]byte("..dot-stuffed leading dot\r\n"),
+		[]byte("more body\r\n"),
+	}
+	for _, ch := range chunks {
+		if p.detectDataTerminator(ch) {
+			t.Fatalf("false positive on chunk %q", ch)
+		}
+	}
+}
