@@ -105,11 +105,11 @@ var (
 
 	// Pre-computed byte slices for SMTP response codes and keywords used in
 	// hot-path classifier scans, so we don't pay an fmt.Sprint allocation
-	// on every chunk.
-	codeActionCompletedBytes   = []byte("250")
-	codeServiceReadyBytes      = []byte("220")
-	codeStartingMailInputBytes = []byte("354")
-	starttlsBytes              = []byte("STARTTLS")
+	// on every chunk. (codeStartingMailInput "354" is handled via the digit
+	// math inside hasResponseCode and intentionally has no []byte form.)
+	codeActionCompletedBytes = []byte("250")
+	codeServiceReadyBytes    = []byte("220")
+	starttlsBytes            = []byte("STARTTLS")
 
 	// copyBufPool recycles the per-direction read buffer used by Pipe.copy.
 	// Each connection previously made(`[]byte, p.bufferSize`) twice
