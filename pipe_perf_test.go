@@ -57,12 +57,22 @@ func buildMailBodyChunk(size int) []byte {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Layer A: Function-level benchmarks for the hot paths called out in
-// PERFORMANCE_INVESTIGATION.md (bytes.Split / bytes.Contains / Replace).
+// Layer A: Function-level benchmarks for the per-chunk hot paths in
+// Pipe.mediateOnUpstream / mediateOnDownstream. CPU and allocation
+// profiles taken under sustained mail-burst load showed three offenders:
 //
-// Each benchmark records B/op and allocs/op via b.ReportAllocs so that the
-// effect of upcoming fixes can be measured numerically. b.SetBytes is set to
-// the input chunk size so `MB/s` throughput is also reported.
+//   1. bytes.Split inside setTimeAtDataStarting / hasResponseCode —
+//      builds [][]byte and TrimRight-s each segment, on every chunk.
+//   2. bytes.Contains scans across the full read buffer in the EHLO
+//      response classifiers, even after the first EHLO response has
+//      already been handled.
+//   3. bytes.Replace inside removeStartTLSCommand allocating a fresh
+//      copy of the full chunk when a mail body happens to contain
+//      "250-STARTTLS\r\n" or "250 STARTTLS\r\n".
+//
+// Each benchmark records B/op and allocs/op via b.ReportAllocs so the
+// effect of the fixes is measurable. b.SetBytes is set to the input
+// chunk size so `MB/s` throughput is also reported.
 // ─────────────────────────────────────────────────────────────────────
 
 // BenchmarkHasResponseCode_LargeBuffer measures bytes.Split inside
@@ -113,12 +123,17 @@ func BenchmarkMediateOnDownstream_LargeBuffer(b *testing.B) {
 }
 
 // BenchmarkMediateOnDownstream_LargeBuffer_WithMisfire enables the
-// removeStartTLSCommand misfire path (p.tls=false) so the per-iteration cost
-// includes bytes.Replace allocations over the full buffer when the chunk
-// happens to contain the literal "250-STARTTLS\r\n" sequence.
+// removeStartTLSCommand misfire path (p.tls=false) so the per-iteration
+// cost includes bytes.Replace allocations over the full buffer when the
+// chunk happens to contain the literal "250-STARTTLS\r\n" sequence.
 //
-// This benchmark numerically captures the cost of PERFORMANCE_INVESTIGATION.md
-// "発見 A" (1.5 GB bytes.Replace alloc traffic in production).
+// This benchmark numerically captures the cost of the misfire pattern
+// observed in production: the EHLO-response classifier returned true on
+// mail-body chunks that incidentally contained both "250" (e.g. in a
+// Received-header IP fragment) and "STARTTLS" (as a literal word), and
+// removeStartTLSCommand then copied the entire chunk via bytes.Replace.
+// Allocation profile from one production sample attributed ~1.5 GB of
+// total allocation to this single bytes.Replace call site.
 func BenchmarkMediateOnDownstream_LargeBuffer_WithMisfire(b *testing.B) {
 	const size = 1024 * 1024
 	chunk := buildMailBodyChunk(size)
@@ -209,12 +224,23 @@ func BenchmarkMediateOnDownstream_EHLOResponse(b *testing.B) {
 // Layer B: Regression test documenting the removeStartTLSCommand misfire.
 // ─────────────────────────────────────────────────────────────────────
 
-// TestMediateOnDownstream_RemoveStartTLSNoMisfireAfterEHLO verifies the fix
-// for PERFORMANCE_INVESTIGATION.md "発見 A": once the first EHLO response
-// has been handled, downstream chunks that happen to contain "250" and
-// "STARTTLS" — e.g. a mail body where "250-STARTTLS\r\n" appears in
-// documentation text — must NOT retrigger removeStartTLSCommand, must NOT
-// allocate a full-buffer bytes.Replace copy, and must NOT flip p.readytls.
+// TestMediateOnDownstream_RemoveStartTLSNoMisfireAfterEHLO verifies the
+// once-only latch on the EHLO-response classifier.
+//
+// Background: removeStartTLSCommand exists to strip "250-STARTTLS\r\n"
+// from the EHLO reply so the client never tries to upgrade. Without a
+// latch the classifier fires on any downstream chunk that contains both
+// "250" and "STARTTLS", including a mail body that incidentally has the
+// literal "250-STARTTLS\r\n" sequence (documentation text, captured
+// EHLO traces, log excerpts, etc.). Each misfire allocates a full-chunk
+// bytes.Replace copy and flips p.readytls, which corrupts the
+// STARTTLS state machine.
+//
+// After the ehloResponseHandled latch lands, once the real EHLO reply
+// has been processed any subsequent downstream chunk — even one that
+// looks like an EHLO reply — must NOT retrigger removeStartTLSCommand,
+// must NOT allocate a full-buffer bytes.Replace copy, and must NOT
+// flip p.readytls.
 func TestMediateOnDownstream_RemoveStartTLSNoMisfireAfterEHLO(t *testing.T) {
 	p := &Pipe{
 		afterCommHook: func(b Data, to Direction) {},
