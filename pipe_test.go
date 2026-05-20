@@ -424,11 +424,10 @@ func TestHandleDataPhaseUpstream_Relay(t *testing.T) {
 	if !bytes.Contains(rBuf.Bytes(), []byte("DATA\r\n")) {
 		t.Errorf("expected DATA command sent to server, got %q", rBuf.String())
 	}
-	if p.pendingRelayMessage == nil {
+	if pending := p.pendingRelayMessage.Load(); pending == nil {
 		t.Fatal("pendingRelayMessage should be set for Relay action")
-	}
-	if !bytes.Contains(p.pendingRelayMessage, []byte("Subject: Test")) {
-		t.Errorf("pendingRelayMessage missing Subject header: %q", p.pendingRelayMessage)
+	} else if !bytes.Contains(*pending, []byte("Subject: Test")) {
+		t.Errorf("pendingRelayMessage missing Subject header: %q", *pending)
 	}
 }
 
@@ -474,7 +473,7 @@ func TestHandleDataPhaseUpstream_Reject(t *testing.T) {
 	}
 
 	// Verify no pendingRelayMessage (server should not be involved)
-	if p.pendingRelayMessage != nil {
+	if p.pendingRelayMessage.Load() != nil {
 		t.Error("pendingRelayMessage should be nil for Reject action")
 	}
 }
@@ -522,14 +521,15 @@ func TestHandleDataPhaseUpstream_AddHeader(t *testing.T) {
 	}
 
 	// Verify modified message stored in pendingRelayMessage
-	if p.pendingRelayMessage == nil {
+	if pending := p.pendingRelayMessage.Load(); pending == nil {
 		t.Fatal("pendingRelayMessage should be set for AddHeader action")
-	}
-	if !bytes.Contains(p.pendingRelayMessage, []byte("X-Spam-Score: 0.1")) {
-		t.Errorf("pendingRelayMessage missing added header: %q", p.pendingRelayMessage)
-	}
-	if !bytes.Contains(p.pendingRelayMessage, []byte("Subject: Hi")) {
-		t.Errorf("pendingRelayMessage missing original header: %q", p.pendingRelayMessage)
+	} else {
+		if !bytes.Contains(*pending, []byte("X-Spam-Score: 0.1")) {
+			t.Errorf("pendingRelayMessage missing added header: %q", *pending)
+		}
+		if !bytes.Contains(*pending, []byte("Subject: Hi")) {
+			t.Errorf("pendingRelayMessage missing original header: %q", *pending)
+		}
 	}
 }
 
@@ -609,7 +609,7 @@ func TestHandleDataPhaseUpstream_BufferOverflow(t *testing.T) {
 	}
 
 	// No server interaction (no pendingRelayMessage, no data sent to rConn)
-	if p.pendingRelayMessage != nil {
+	if p.pendingRelayMessage.Load() != nil {
 		t.Error("pendingRelayMessage should be nil after overflow")
 	}
 }
@@ -780,7 +780,8 @@ func TestMediateOnUpstream_DelegatesInDataPhase(t *testing.T) {
 
 func TestMediateOnDownstream_PendingRelayOn354(t *testing.T) {
 	p, _, rRemote := newTestPipeWithConns(t)
-	p.pendingRelayMessage = []byte("Subject: Test\r\n\r\nHello\r\n")
+	pending := []byte("Subject: Test\r\n\r\nHello\r\n")
+	p.pendingRelayMessage.Store(&pending)
 
 	// Read relayed message from rRemote (server side)
 	var rBuf bytes.Buffer
@@ -810,7 +811,7 @@ func TestMediateOnDownstream_PendingRelayOn354(t *testing.T) {
 	if !isContinue {
 		t.Error("expected isContinue=true to suppress server's 354")
 	}
-	if p.pendingRelayMessage != nil {
+	if p.pendingRelayMessage.Load() != nil {
 		t.Error("pendingRelayMessage should be cleared after relay")
 	}
 
@@ -826,9 +827,10 @@ func TestMediateOnDownstream_PendingRelayOn354(t *testing.T) {
 
 func TestMediateOnDownstream_PendingRelayServerReject(t *testing.T) {
 	p := &Pipe{
-		afterCommHook:       func(b Data, to Direction) {},
-		pendingRelayMessage: []byte("Subject: Test\r\n\r\nHello\r\n"),
+		afterCommHook: func(b Data, to Direction) {},
 	}
+	pending := []byte("Subject: Test\r\n\r\nHello\r\n")
+	p.pendingRelayMessage.Store(&pending)
 
 	// Server rejects DATA command with 503
 	resp := []byte("503 5.5.1 Bad sequence of commands\r\n")
@@ -840,7 +842,7 @@ func TestMediateOnDownstream_PendingRelayServerReject(t *testing.T) {
 	if isContinue {
 		t.Error("expected isContinue=false to forward server error to client")
 	}
-	if p.pendingRelayMessage != nil {
+	if p.pendingRelayMessage.Load() != nil {
 		t.Error("pendingRelayMessage should be cleared after server rejection")
 	}
 }
@@ -901,11 +903,10 @@ func TestHandleDataPhaseUpstream_NilResult(t *testing.T) {
 	if !bytes.Contains(rBuf.Bytes(), []byte("DATA\r\n")) {
 		t.Errorf("expected DATA sent to server on nil result, got %q", rBuf.String())
 	}
-	if p.pendingRelayMessage == nil {
+	if pending := p.pendingRelayMessage.Load(); pending == nil {
 		t.Fatal("pendingRelayMessage should be set on nil result (fallback to Relay)")
-	}
-	if !bytes.Contains(p.pendingRelayMessage, []byte("Subject: test")) {
-		t.Errorf("pendingRelayMessage missing content: %q", p.pendingRelayMessage)
+	} else if !bytes.Contains(*pending, []byte("Subject: test")) {
+		t.Errorf("pendingRelayMessage missing content: %q", *pending)
 	}
 }
 
@@ -944,11 +945,10 @@ func TestHandleDataPhaseUpstream_UnknownAction(t *testing.T) {
 	if !bytes.Contains(rBuf.Bytes(), []byte("DATA\r\n")) {
 		t.Errorf("expected DATA sent to server on unknown action, got %q", rBuf.String())
 	}
-	if p.pendingRelayMessage == nil {
+	if pending := p.pendingRelayMessage.Load(); pending == nil {
 		t.Fatal("pendingRelayMessage should be set on unknown action")
-	}
-	if !bytes.Contains(p.pendingRelayMessage, []byte("Subject: unknown")) {
-		t.Errorf("pendingRelayMessage missing content: %q", p.pendingRelayMessage)
+	} else if !bytes.Contains(*pending, []byte("Subject: unknown")) {
+		t.Errorf("pendingRelayMessage missing content: %q", *pending)
 	}
 }
 

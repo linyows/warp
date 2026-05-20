@@ -66,8 +66,16 @@ type Pipe struct {
 	upDataTail     [dataTerminatorTailLen]byte
 	upDataTailFill int
 
-	pendingRelayMessage []byte // buffered message waiting for server 354 after filter approval
-	senderIP            string
+	// pendingRelayMessage is the message body that the upstream goroutine
+	// has accepted via FilterHook and is waiting to relay to the server
+	// after seeing the server's 354 reply on the downstream side. It is
+	// written by mediateOnUpstream (after the filter decision) and read
+	// by mediateOnDownstream (when 354 arrives), so the handoff crosses
+	// goroutines. atomic.Pointer gives a race-free Store/Load even though
+	// the TCP round-trip would normally serialise the access by accident.
+	pendingRelayMessage atomic.Pointer[[]byte]
+
+	senderIP string
 
 	// Filter hook (nil if no FilterHook registered)
 	beforeRelayHook func(*BeforeRelayData) *FilterResult
@@ -416,13 +424,15 @@ func (p *Pipe) handleDataPhaseUpstream(b []byte, i int) ([]byte, int, bool) {
 
 	case FilterAddHeader:
 		// Store modified message, send DATA to server; downstream handles 354 and relay
-		p.pendingRelayMessage = result.Message
+		m := result.Message
+		p.pendingRelayMessage.Store(&m)
 		_, _ = p.rConn.Write([]byte("DATA" + crlf))
 		go p.afterCommHook([]byte("filter: add header"), onPxy)
 
 	default:
 		// FilterRelay or unknown action: store original message, send DATA to server
-		p.pendingRelayMessage = message
+		m := message
+		p.pendingRelayMessage.Store(&m)
 		_, _ = p.rConn.Write([]byte("DATA" + crlf))
 		go p.afterCommHook([]byte("filter: relay"), onPxy)
 	}
@@ -511,11 +521,11 @@ func (p *Pipe) mediateOnDownstream(b []byte, i int) ([]byte, int, bool) {
 	}
 
 	// FilterHook: relay buffered message to server after receiving 354
-	if p.pendingRelayMessage != nil {
+	if pending := p.pendingRelayMessage.Load(); pending != nil {
 		if p.hasResponseCode(data, codeStartingMailInput) {
 			// Server accepted DATA, relay buffered message + terminator
-			msg := p.pendingRelayMessage
-			p.pendingRelayMessage = nil
+			msg := *pending
+			p.pendingRelayMessage.Store(nil)
 			_, _ = p.rConn.Write(msg)
 			if !bytes.HasSuffix(msg, []byte(crlf)) {
 				_, _ = p.rConn.Write([]byte(crlf))
@@ -525,7 +535,7 @@ func (p *Pipe) mediateOnDownstream(b []byte, i int) ([]byte, int, bool) {
 			return b, i, true // Suppress server's 354 (client already received fake 354)
 		}
 		// Server rejected DATA (e.g. 503, 451): forward error to client
-		p.pendingRelayMessage = nil
+		p.pendingRelayMessage.Store(nil)
 		go p.afterCommHook([]byte("filter: server rejected DATA"), onPxy)
 		// Fall through to relay error response to client
 	}
