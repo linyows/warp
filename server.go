@@ -82,6 +82,12 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) HandleConnection(conn net.Conn) {
+	// Ensure the inbound connection is always closed, including on the
+	// early-return error paths below (original-dst lookup, addr resolve,
+	// dial). Pipe.Do/Pipe.Close also close conn but net.Conn.Close is
+	// idempotent, so the redundant calls are harmless.
+	defer func() { _ = conn.Close() }()
+
 	uuid := GenID().String()
 	if s.Verbose {
 		s.log.Printf("%s %s connected from %s", uuid, onPxy, conn.RemoteAddr())
@@ -126,6 +132,9 @@ func (s *Server) HandleConnection(conn net.Conn) {
 		s.log.Printf("%s %s dial `%s` with `%s` error: %s(%#v)", uuid, onPxy, raddr, laddr, err.Error(), err)
 		return
 	}
+	// Mirror the defer above for the outbound dial so the destination
+	// socket also has a guaranteed close path (idempotent with Pipe.Close).
+	defer func() { _ = dstConn.Close() }()
 
 	// Detect FilterHook in hooks list
 	var filterHook FilterHook

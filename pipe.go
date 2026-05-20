@@ -9,6 +9,8 @@ import (
 	"net"
 	"regexp"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -24,13 +26,23 @@ type Pipe struct {
 	sServerName []byte
 	rServerName []byte
 
-	tls      bool
-	readytls bool
-	locked   bool
+	// Boolean state flags shared between the upstream and downstream
+	// copy goroutines. They are atomic.Bool so that reads on one side and
+	// writes on the other are race-free under -race (and have well-defined
+	// happens-before semantics under the Go memory model).
+	tls      atomic.Bool
+	readytls atomic.Bool
+	locked   atomic.Bool
 	blocker  chan interface{}
 
-	isWaitedStarttlsRes bool
-	isHeaderRemoved     bool
+	isWaitedStarttlsRes atomic.Bool
+	isHeaderRemoved     atomic.Bool
+
+	// ehloResponseHandled latches once the first EHLO response (with or
+	// without STARTTLS) has been classified, so that later downstream
+	// chunks — including mail-body bytes that happen to contain "250" and
+	// "STARTTLS" — cannot retrigger removeStartTLSCommand.
+	ehloResponseHandled atomic.Bool
 
 	timeAtConnected    time.Time
 	timeAtDataStarting time.Time
@@ -38,13 +50,32 @@ type Pipe struct {
 	afterCommHook func(Data, Direction)
 	afterConnHook func()
 
-	// DATA phase buffering for filter hooks
-	inDataPhase        bool
-	dataBuffer         *bytes.Buffer
-	dataBufferSize     int
-	discardingData     bool     // discard remaining client data after buffer overflow
-	pendingRelayMessage []byte  // buffered message waiting for server 354 after filter approval
-	senderIP           string
+	// DATA phase buffering for filter hooks. inDataPhase is shared between
+	// upstream (sets it on DATA command or terminator) and downstream (sets
+	// it on the server's 354 reply); discardingData is upstream-only.
+	inDataPhase    atomic.Bool
+	dataBuffer     *bytes.Buffer
+	dataBufferSize int
+	discardingData bool // discard remaining client data after buffer overflow
+
+	// Non-filter DATA-phase fast-path state. The end-of-data terminator
+	// "\r\n.\r\n" may straddle a TCP read boundary, so detectDataTerminator
+	// keeps the last (len(dataTerminator)-1) bytes of the previous chunk
+	// here and joins them with the prefix of the next chunk before
+	// scanning. Both fields are upstream-goroutine-only and need no sync.
+	upDataTail     [dataTerminatorTailLen]byte
+	upDataTailFill int
+
+	// pendingRelayMessage is the message body that the upstream goroutine
+	// has accepted via FilterHook and is waiting to relay to the server
+	// after seeing the server's 354 reply on the downstream side. It is
+	// written by mediateOnUpstream (after the filter decision) and read
+	// by mediateOnDownstream (when 354 arrives), so the handoff crosses
+	// goroutines. atomic.Pointer gives a race-free Store/Load even though
+	// the TCP round-trip would normally serialise the access by accident.
+	pendingRelayMessage atomic.Pointer[[]byte]
+
+	senderIP string
 
 	// Filter hook (nil if no FilterHook registered)
 	beforeRelayHook func(*BeforeRelayData) *FilterResult
@@ -88,7 +119,63 @@ var (
 	mailToRegex         = regexp.MustCompile(rcptToRegex)
 	mailFromRegexStrict = regexp.MustCompile(mailRegexStrict)
 	mailToRegexStrict   = regexp.MustCompile(rcptToRegexStrict)
+
+	// Pre-computed byte slices for SMTP response codes and keywords used in
+	// hot-path classifier scans, so we don't pay an fmt.Sprint allocation
+	// on every chunk. (codeStartingMailInput "354" is handled via the digit
+	// math inside hasResponseCode and intentionally has no []byte form.)
+	codeActionCompletedBytes = []byte("250")
+	codeServiceReadyBytes    = []byte("220")
+	starttlsBytes            = []byte("STARTTLS")
+
+	// copyBufPool recycles the per-direction read buffer used by Pipe.copy.
+	// Each connection previously made(`[]byte, p.bufferSize`) twice
+	// (upstream + downstream); with a default bufferSize of 10 MiB that is
+	// 20 MiB of fresh allocation per connection, which dominates the
+	// allocation profile under load.
+	copyBufPool sync.Pool
 )
+
+// acquireCopyBuf returns a *[]byte from the pool with len == size. If the
+// pool is empty or the pooled entry is too small, a fresh slice is created.
+func acquireCopyBuf(size int) *[]byte {
+	if v := copyBufPool.Get(); v != nil {
+		bp := v.(*[]byte)
+		if cap(*bp) >= size {
+			*bp = (*bp)[:size]
+			return bp
+		}
+		// Pooled buffer was smaller than requested; drop it (let GC) and
+		// allocate a fresh one. The replacement will be pooled on release.
+	}
+	nb := make([]byte, size)
+	return &nb
+}
+
+// releaseCopyBuf returns a buffer to the pool, restoring its slice header
+// to its full capacity so the next caller can resize freely.
+func releaseCopyBuf(bp *[]byte) {
+	if bp == nil {
+		return
+	}
+	*bp = (*bp)[:cap(*bp)]
+	copyBufPool.Put(bp)
+}
+
+// dupData returns an independent copy of b. afterCommHook is invoked
+// asynchronously via `go p.afterCommHook(...)`; its byte-slice arguments
+// must not alias the per-direction read buffer, because Pipe.copy reuses
+// that buffer on every iteration (and the buffer itself is now shared
+// across connections via sync.Pool). Without this defensive copy the
+// async hook can read the same array that the next Read is writing into.
+func dupData(b []byte) []byte {
+	if len(b) == 0 {
+		return nil
+	}
+	c := make([]byte, len(b))
+	copy(c, b)
+	return c
+}
 
 func (e Elapse) String() string {
 	return fmt.Sprintf("%d msec", e)
@@ -135,7 +222,19 @@ func isRFCCompliant(match []byte, strictRegex *regexp.Regexp) bool {
 func (p *Pipe) mediateOnUpstream(b []byte, i int) ([]byte, int, bool) {
 	data := b[0:i]
 
-	if !p.tls || p.rMailAddr == nil {
+	// Fast path: once the DATA phase has been entered on a non-filter
+	// connection, every upstream chunk is mail body bytes — they cannot
+	// contain SMTP commands, so all command/regex scans must be skipped.
+	// detectDataTerminator handles the "\r\n.\r\n" marker even when it
+	// straddles a TCP read boundary by carrying a small tail across calls.
+	if p.inDataPhase.Load() && p.beforeRelayHook == nil {
+		if p.detectDataTerminator(data) {
+			p.inDataPhase.Store(false)
+		}
+		return b, i, false
+	}
+
+	if !p.tls.Load() || p.rMailAddr == nil {
 		p.setSenderMailAddress(data)
 		p.setSenderServerName(data)
 		p.setReceiverMailAddressAndServerName(data)
@@ -143,38 +242,38 @@ func (p *Pipe) mediateOnUpstream(b []byte, i int) ([]byte, int, bool) {
 
 	// FilterHook: DATA phase buffering
 	if p.beforeRelayHook != nil {
-		if p.inDataPhase {
+		if p.inDataPhase.Load() {
 			return p.handleDataPhaseUpstream(b, i)
 		}
 		if p.isDataCommand(data) {
 			// Don't relay DATA to server; send fake 354 to client
 			_, _ = p.sConn.Write([]byte("354 Start mail input" + crlf))
-			p.inDataPhase = true
+			p.inDataPhase.Store(true)
 			p.dataBuffer = &bytes.Buffer{}
 			p.timeAtDataStarting = time.Now()
-			go p.afterCommHook(data, srcToPxy)
+			go p.afterCommHook(dupData(data), srcToPxy)
 			go p.afterCommHook([]byte("354 Start mail input"), pxyToSrc)
 			return b, i, true // Suppress relay to server
 		}
 	}
 
-	if !p.tls && p.readytls {
-		p.locked = true
+	if !p.tls.Load() && p.readytls.Load() {
+		p.locked.Store(true)
 		er := p.starttls()
-		p.isWaitedStarttlsRes = true
+		p.isWaitedStarttlsRes.Store(true)
 		if er != nil {
 			go p.afterCommHook([]byte(fmt.Sprintf("starttls error: %s", er.Error())), pxyToDst)
 		}
-		p.readytls = false
-		go p.afterCommHook(data, srcToPxy)
+		p.readytls.Store(false)
+		go p.afterCommHook(dupData(data), srcToPxy)
 	}
 
-	if p.locked {
+	if p.locked.Load() {
 		p.waitForTLSConn(b, i)
-		go p.afterCommHook(data, pxyToDst)
+		go p.afterCommHook(dupData(data), pxyToDst)
 	} else {
-		if !p.isHeaderRemoved {
-			go p.afterCommHook(p.removeMailBody(data), srcToDst)
+		if !p.isHeaderRemoved.Load() {
+			go p.afterCommHook(dupData(p.removeMailBody(data)), srcToDst)
 		}
 	}
 
@@ -193,6 +292,68 @@ func (p *Pipe) isDataCommand(data []byte) bool {
 // dataTerminator is the SMTP end-of-data marker.
 var dataTerminator = []byte("\r\n.\r\n")
 
+// dataTerminatorTailLen is len(dataTerminator)-1: the maximum number of
+// bytes from the previous chunk that we need to keep around in order to
+// detect a terminator that straddles a TCP read boundary.
+const dataTerminatorTailLen = 4
+
+// detectDataTerminator reports whether dataTerminator appears in the
+// current chunk or across the boundary with the previous chunk. It
+// updates p.upDataTail / p.upDataTailFill so the next call can keep
+// scanning across read boundaries.
+//
+// Called only from the upstream goroutine while inDataPhase is true and
+// no FilterHook is registered; the tail fields are accessed by no other
+// goroutine and therefore need no synchronisation.
+func (p *Pipe) detectDataTerminator(data []byte) bool {
+	if len(data) == 0 {
+		return false
+	}
+
+	// First, check the boundary region: prev tail + leading bytes of the
+	// new chunk. A stack-allocated 8-byte buffer fits the worst case
+	// (4 carried bytes + up to 4 new bytes), which is enough to contain
+	// any straddling 5-byte terminator.
+	if p.upDataTailFill > 0 {
+		var boundary [dataTerminatorTailLen * 2]byte
+		n := copy(boundary[:], p.upDataTail[:p.upDataTailFill])
+		take := dataTerminatorTailLen
+		if take > len(data) {
+			take = len(data)
+		}
+		n += copy(boundary[n:], data[:take])
+		if bytes.Contains(boundary[:n], dataTerminator) {
+			p.upDataTailFill = 0
+			return true
+		}
+	}
+
+	// Then check inside the new chunk in one pass.
+	if bytes.Contains(data, dataTerminator) {
+		p.upDataTailFill = 0
+		return true
+	}
+
+	// Save the last dataTerminatorTailLen bytes of the combined stream so
+	// the next call can resume across the next boundary.
+	if len(data) >= dataTerminatorTailLen {
+		copy(p.upDataTail[:], data[len(data)-dataTerminatorTailLen:])
+		p.upDataTailFill = dataTerminatorTailLen
+	} else {
+		keep := dataTerminatorTailLen - len(data)
+		if keep > p.upDataTailFill {
+			keep = p.upDataTailFill
+		}
+		if keep > 0 {
+			// Shift the kept bytes of the existing tail to the front.
+			copy(p.upDataTail[:keep], p.upDataTail[p.upDataTailFill-keep:p.upDataTailFill])
+		}
+		copy(p.upDataTail[keep:], data)
+		p.upDataTailFill = keep + len(data)
+	}
+	return false
+}
+
 // handleDataPhaseUpstream buffers client data during DATA phase and invokes filter hook.
 func (p *Pipe) handleDataPhaseUpstream(b []byte, i int) ([]byte, int, bool) {
 	data := b[0:i]
@@ -200,7 +361,7 @@ func (p *Pipe) handleDataPhaseUpstream(b []byte, i int) ([]byte, int, bool) {
 	// Discard mode: consume remaining client data after buffer overflow until terminator
 	if p.discardingData {
 		if bytes.Contains(data, dataTerminator) {
-			p.inDataPhase = false
+			p.inDataPhase.Store(false)
 			p.discardingData = false
 		}
 		return b, i, true
@@ -215,7 +376,7 @@ func (p *Pipe) handleDataPhaseUpstream(b []byte, i int) ([]byte, int, bool) {
 		go p.afterCommHook([]byte("filter buffer overflow"), onPxy)
 		// Check if terminator is in current chunk
 		if bytes.Contains(data, dataTerminator) {
-			p.inDataPhase = false
+			p.inDataPhase.Store(false)
 			p.discardingData = false
 		}
 		return b, i, true
@@ -251,7 +412,7 @@ func (p *Pipe) handleDataPhaseUpstream(b []byte, i int) ([]byte, int, bool) {
 		result = &FilterResult{Action: FilterRelay}
 	}
 
-	p.inDataPhase = false
+	p.inDataPhase.Store(false)
 	p.dataBuffer = nil
 
 	switch result.Action {
@@ -263,13 +424,15 @@ func (p *Pipe) handleDataPhaseUpstream(b []byte, i int) ([]byte, int, bool) {
 
 	case FilterAddHeader:
 		// Store modified message, send DATA to server; downstream handles 354 and relay
-		p.pendingRelayMessage = result.Message
+		m := result.Message
+		p.pendingRelayMessage.Store(&m)
 		_, _ = p.rConn.Write([]byte("DATA" + crlf))
 		go p.afterCommHook([]byte("filter: add header"), onPxy)
 
 	default:
 		// FilterRelay or unknown action: store original message, send DATA to server
-		p.pendingRelayMessage = message
+		m := message
+		p.pendingRelayMessage.Store(&m)
 		_, _ = p.rConn.Write([]byte("DATA" + crlf))
 		go p.afterCommHook([]byte("filter: relay"), onPxy)
 	}
@@ -277,19 +440,38 @@ func (p *Pipe) handleDataPhaseUpstream(b []byte, i int) ([]byte, int, bool) {
 	return b, i, true
 }
 
-// hasResponseCode checks if any line in b starts with the given 3-digit SMTP response code.
-// Matches "CODE " or "CODE-" (multi-line) at line start per RFC 5321.
+// hasResponseCode checks if any line in b starts with the given 3-digit SMTP
+// response code. Matches "CODE " or "CODE-" (multi-line) at line start per
+// RFC 5321. Implemented as an IndexByte loop so it allocates nothing and
+// only scans the buffer once.
 func (p *Pipe) hasResponseCode(b []byte, code int) bool {
-	codeStr := fmt.Sprint(code)
-	for _, line := range bytes.Split(b, []byte("\n")) {
-		line = bytes.TrimRight(line, "\r")
-		if len(line) < 3 {
+	// Encode code as 3 ASCII digits without going through fmt.Sprint.
+	if code < 100 || code > 999 {
+		return false
+	}
+	d0 := byte('0' + code/100)
+	d1 := byte('0' + (code/10)%10)
+	d2 := byte('0' + code%10)
+
+	for start := 0; start < len(b); {
+		// Locate end of current line.
+		nl := bytes.IndexByte(b[start:], '\n')
+		var line []byte
+		if nl < 0 {
+			line = b[start:]
+			start = len(b)
+		} else {
+			line = b[start : start+nl]
+			start += nl + 1
+		}
+		// Strip a trailing CR if present (without allocating).
+		if len(line) > 0 && line[len(line)-1] == '\r' {
+			line = line[:len(line)-1]
+		}
+		if len(line) < 3 || line[0] != d0 || line[1] != d1 || line[2] != d2 {
 			continue
 		}
-		if string(line[:3]) != codeStr {
-			continue
-		}
-		// Exact 3-char line, or followed by space/hyphen (RFC 5321 reply format)
+		// Exact 3-char line, or followed by space/hyphen (RFC 5321 reply format).
 		if len(line) == 3 || line[3] == ' ' || line[3] == '-' {
 			return true
 		}
@@ -311,12 +493,21 @@ func sanitizeReply(reply string) string {
 func (p *Pipe) mediateOnDownstream(b []byte, i int) ([]byte, int, bool) {
 	data := b[0:i]
 
-	if p.isResponseOfEHLOWithStartTLS(b) {
-		go p.afterCommHook(data, dstToPxy)
-		b, i = p.removeStartTLSCommand(b, i)
+	// Classify the EHLO response once and reuse below to avoid scanning
+	// the buffer twice (once for "with STARTTLS", once for "without").
+	// Classifiers MUST scan only the valid data window (data, not b) — the
+	// underlying buffer may extend past i, especially when it is shared
+	// across connections via sync.Pool and still contains bytes from a
+	// previous connection.
+	withStartTLS, withoutStartTLS := p.classifyEHLOResponse(data)
+
+	if withStartTLS {
+		go p.afterCommHook(dupData(data), dstToPxy)
+		b, i = p.removeStartTLSCommand(data, i)
 		data = b[0:i]
-	} else if p.isResponseOfReadyToStartTLS(b) {
-		go p.afterCommHook(data, dstToPxy)
+		p.ehloResponseHandled.Store(true)
+	} else if p.isResponseOfReadyToStartTLS(data) {
+		go p.afterCommHook(dupData(data), dstToPxy)
 		er := p.connectTLS()
 		if er != nil {
 			go p.afterCommHook([]byte(fmt.Sprintf("TLS connection error: %s", er.Error())), dstToPxy)
@@ -324,17 +515,17 @@ func (p *Pipe) mediateOnDownstream(b []byte, i int) ([]byte, int, bool) {
 	}
 
 	// remove buffering "220 2.0.0 Ready to start TLS" response
-	if p.isWaitedStarttlsRes {
-		p.isWaitedStarttlsRes = false
+	if p.isWaitedStarttlsRes.Load() {
+		p.isWaitedStarttlsRes.Store(false)
 		return b, i, true
 	}
 
 	// FilterHook: relay buffered message to server after receiving 354
-	if p.pendingRelayMessage != nil {
+	if pending := p.pendingRelayMessage.Load(); pending != nil {
 		if p.hasResponseCode(data, codeStartingMailInput) {
 			// Server accepted DATA, relay buffered message + terminator
-			msg := p.pendingRelayMessage
-			p.pendingRelayMessage = nil
+			msg := *pending
+			p.pendingRelayMessage.Store(nil)
 			_, _ = p.rConn.Write(msg)
 			if !bytes.HasSuffix(msg, []byte(crlf)) {
 				_, _ = p.rConn.Write([]byte(crlf))
@@ -344,30 +535,28 @@ func (p *Pipe) mediateOnDownstream(b []byte, i int) ([]byte, int, bool) {
 			return b, i, true // Suppress server's 354 (client already received fake 354)
 		}
 		// Server rejected DATA (e.g. 503, 451): forward error to client
-		p.pendingRelayMessage = nil
+		p.pendingRelayMessage.Store(nil)
 		go p.afterCommHook([]byte("filter: server rejected DATA"), onPxy)
 		// Fall through to relay error response to client
 	}
 
-	// time before email input
-	p.setTimeAtDataStarting(b)
+	// Detect the server's 354 reply once to (a) record the data-phase start
+	// time and (b) enter the upstream fast path for non-filter connections.
+	// Scan only the valid data window (data, not b) — the buffer may carry
+	// stale bytes from a previous connection when it comes from the pool.
+	if !p.inDataPhase.Load() && p.beforeRelayHook == nil && p.hasResponseCode(data, codeStartingMailInput) {
+		p.inDataPhase.Store(true)
+		p.timeAtDataStarting = time.Now()
+	}
 
-	if p.isResponseOfEHLOWithoutStartTLS(b) {
-		go p.afterCommHook(data, pxyToSrc)
+	if withoutStartTLS {
+		p.ehloResponseHandled.Store(true)
+		go p.afterCommHook(dupData(data), pxyToSrc)
 	} else {
-		go p.afterCommHook(data, dstToSrc)
+		go p.afterCommHook(dupData(data), dstToSrc)
 	}
 
 	return b, i, false
-}
-
-func (p *Pipe) setTimeAtDataStarting(b []byte) {
-	list := bytes.Split(b, []byte(crlf))
-	for _, v := range list {
-		if len(v) >= 3 && string(v[:3]) == fmt.Sprint(codeStartingMailInput) {
-			p.timeAtDataStarting = time.Now()
-		}
-	}
 }
 
 func (p *Pipe) Do() {
@@ -375,7 +564,10 @@ func (p *Pipe) Do() {
 	go p.afterCommHook([]byte(fmt.Sprintf("connected to %s", p.rAddr)), onPxy)
 
 	p.blocker = make(chan interface{})
-	done := make(chan bool)
+	// Buffered so neither copy-goroutine can block on its completion send,
+	// preventing the previously observed goroutine leak when one side
+	// finishes before the other.
+	done := make(chan bool, 2)
 
 	// Sender --- packet --> Proxy
 	go func() {
@@ -395,6 +587,13 @@ func (p *Pipe) Do() {
 		done <- true
 	}()
 
+	// Wait for one side to finish, force-close both connections so the
+	// other side's blocked Read returns with net.ErrClosed, then wait for
+	// it as well. This guarantees both goroutines exit before Do returns,
+	// so their pooled buffers can be released and no goroutines are leaked.
+	<-done
+	_ = p.sConn.Close()
+	_ = p.rConn.Close()
 	<-done
 }
 
@@ -485,17 +684,28 @@ func (p *Pipe) copy(dr Flow, fn Mediator) (written int64, err error) {
 		}
 		go p.afterCommHook([]byte(fmt.Sprintf("io.Reader size: %d", size)), onPxy)
 	}
-	buf := make([]byte, p.bufferSize)
+
+	// Acquire the per-direction read buffer from a sync.Pool so it can be
+	// reused across connections. origBuf retains the underlying array; the
+	// per-iteration buf is reset to origBuf before each Read so that a
+	// mediator returning a smaller/different slice (e.g. removeStartTLSCommand
+	// via bytes.Replace) does not shrink the buffer used by the next Read.
+	bufp := acquireCopyBuf(size)
+	defer releaseCopyBuf(bufp)
+	origBuf := *bufp
 
 	for {
 		var isContinue bool
 		// Only block upstream while pipe is locked for TLS negotiation.
 		// Downstream must continue reading to receive the server's "220 Ready"
 		// response and complete the TLS handshake via connectTLS().
-		if p.locked && dr == upstream {
+		// Reorder so the downstream goroutine never reads p.locked (race-free
+		// short-circuit when dr != upstream).
+		if dr == upstream && p.locked.Load() {
 			continue
 		}
 
+		buf := origBuf
 		nr, er := p.src(dr).Read(buf)
 		if nr > 0 {
 			// Run the Mediator!
@@ -559,7 +769,7 @@ func (p *Pipe) waitForTLSConn(b []byte, i int) {
 	go p.afterCommHook([]byte("pipe locked for tls connection"), onPxy)
 	<-p.blocker
 	go p.afterCommHook([]byte("tls connected, to pipe unlocked"), onPxy)
-	p.locked = false
+	p.locked.Store(false)
 }
 
 func (p *Pipe) connectTLS() error {
@@ -578,7 +788,7 @@ func (p *Pipe) connectTLS() error {
 		return err
 	}
 
-	p.tls = true
+	p.tls.Store(true)
 	p.blocker <- false
 
 	return nil
@@ -595,16 +805,36 @@ func (p *Pipe) Close() {
 	go p.afterConnHook()
 }
 
+// classifyEHLOResponse runs the shared bytes.Contains scans for the EHLO
+// response classifiers exactly once, returning whether the buffer looks
+// like an EHLO reply with or without STARTTLS. Connections that have
+// already entered TLS, are locked for handshake, or have already handled
+// the first EHLO response receive (false, false) without scanning.
+func (p *Pipe) classifyEHLOResponse(b []byte) (withStartTLS, withoutStartTLS bool) {
+	if p.tls.Load() || p.locked.Load() || p.ehloResponseHandled.Load() {
+		return false, false
+	}
+	if !bytes.Contains(b, codeActionCompletedBytes) {
+		return false, false
+	}
+	if bytes.Contains(b, starttlsBytes) {
+		return true, false
+	}
+	return false, true
+}
+
 func (p *Pipe) isResponseOfEHLOWithStartTLS(b []byte) bool {
-	return !p.tls && !p.locked && bytes.Contains(b, []byte(fmt.Sprint(codeActionCompleted))) && bytes.Contains(b, []byte("STARTTLS"))
+	withStartTLS, _ := p.classifyEHLOResponse(b)
+	return withStartTLS
 }
 
 func (p *Pipe) isResponseOfEHLOWithoutStartTLS(b []byte) bool {
-	return !p.tls && !p.locked && bytes.Contains(b, []byte(fmt.Sprint(codeActionCompleted))) && !bytes.Contains(b, []byte("STARTTLS"))
+	_, withoutStartTLS := p.classifyEHLOResponse(b)
+	return withoutStartTLS
 }
 
 func (p *Pipe) isResponseOfReadyToStartTLS(b []byte) bool {
-	return !p.tls && p.locked && bytes.Contains(b, []byte(fmt.Sprint(codeServiceReady)))
+	return !p.tls.Load() && p.locked.Load() && bytes.Contains(b, codeServiceReadyBytes)
 }
 
 func (p *Pipe) removeMailBody(b Data) Data {
@@ -612,7 +842,7 @@ func (p *Pipe) removeMailBody(b Data) Data {
 	if i == -1 {
 		return b
 	}
-	p.isHeaderRemoved = true
+	p.isHeaderRemoved.Store(true)
 	return b[:i]
 }
 
@@ -624,7 +854,7 @@ func (p *Pipe) removeStartTLSCommand(b []byte, i int) ([]byte, int) {
 		old := []byte(lastLine)
 		b = bytes.Replace(b, old, []byte(""), 1)
 		i = i - len(old)
-		p.readytls = true
+		p.readytls.Store(true)
 
 		arr := strings.Split(string(b), crlf)
 		num := len(arr) - 2
@@ -635,7 +865,7 @@ func (p *Pipe) removeStartTLSCommand(b []byte, i int) ([]byte, int) {
 		old := []byte(intermediateLine)
 		b = bytes.Replace(b, old, []byte(""), 1)
 		i = i - len(old)
-		p.readytls = true
+		p.readytls.Store(true)
 
 	} else {
 		go p.afterCommHook([]byte("starttls replace error"), dstToPxy)
