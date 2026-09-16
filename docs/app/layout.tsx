@@ -1,6 +1,5 @@
 import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
-import 'rotion/style.css'
 import './globals.css'
 
 const inter = Inter({
@@ -11,6 +10,7 @@ const inter = Inter({
 })
 
 export const metadata: Metadata = {
+  metadataBase: new URL('https://warp.linyo.ws'),
   title: 'Warp',
 }
 

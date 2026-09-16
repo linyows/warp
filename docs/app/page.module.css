@@ -45,6 +45,7 @@
   padding: 0 0 2rem 0;
   position: absolute;
   margin-top: -.7rem;
+  width: 5rem;
 }
 
 .page h2 {
@@ -52,13 +53,132 @@
   font-weight: bold;
   font-size: 1rem;
   position: relative;
-  margin-top: 2rem;
+  margin-top: 3.5rem;
+  margin-bottom: 1rem;
   padding: .7rem .2rem .5rem 1rem;
   letter-spacing: .8rem;
   text-transform: uppercase;
   background-color: rgb(var(--foreground-rgb));
   color: rgb(var(--background-end-rgb));
   display: inline-block;
+}
+
+.langNav {
+  font-size: .75rem;
+  letter-spacing: .05rem;
+  padding: 1.2rem 0 0;
+}
+
+.langNav span {
+  opacity: .4;
+}
+
+.content {
+  line-height: 1.5;
+}
+
+.content[lang="ja"] h2 {
+  letter-spacing: .3rem;
+  padding-right: .7rem;
+}
+
+.content p {
+  margin: 0;
+  padding: .6rem 0;
+}
+
+.content h3 {
+  font-size: 1rem;
+  line-height: 1.3;
+  margin: 0;
+  padding: 1.6rem 0 3px;
+}
+
+.content ul,
+.content ol {
+  margin: 0;
+  padding: .3rem 0 .3rem 1.4rem;
+}
+
+.content li {
+  padding: .1rem 0;
+}
+
+.content img {
+  display: block;
+  height: auto;
+  margin: 1rem auto;
+  max-width: 100%;
+}
+
+.content a img {
+  display: inline-block;
+  height: 1em;
+  margin: 0 .4em 0 0;
+  vertical-align: -.15em;
+  width: auto;
+}
+
+.content pre {
+  background-color: #f5f2f0;
+  border-radius: 4px;
+  font-size: .8rem;
+  margin: 1rem 0;
+  overflow-x: auto;
+  padding: .6rem 1rem;
+}
+
+.content code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.content :not(pre) > code {
+  background-color: hsla(44, 6%, 50%, .15);
+  border-radius: 4px;
+  font-size: .9rem;
+  padding: .1rem .3rem;
+}
+
+.content blockquote {
+  border-left: 3px solid rgb(var(--foreground-rgb));
+  margin: 1rem 0;
+  padding-left: 1rem;
+}
+
+.content table {
+  border-collapse: collapse;
+  margin: 1rem 0;
+}
+
+.content th,
+.content td {
+  border: 1px solid rgba(var(--foreground-rgb), .3);
+  padding: .4rem .8rem;
+  text-align: left;
+}
+
+.content th {
+  background-color: rgba(var(--foreground-rgb), .08);
+}
+
+.content hr {
+  border: 0;
+  border-top: 1px solid rgba(var(--foreground-rgb), .3);
+  margin: 1.5rem 0;
+}
+
+@media (prefers-color-scheme: dark) {
+  .content a img {
+    filter: invert(1);
+  }
+
+  .content pre {
+    background-color: #2d2d2d;
+  }
+
+  .content :not(pre) > code {
+    background-color: hsla(44, 6%, 50%, .3);
+  }
 }
 
 .footer {
