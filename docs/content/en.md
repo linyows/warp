@@ -5,30 +5,30 @@ description: Warp is an outbound transparent SMTP proxy with SMTP-level logging,
 
 **WARP** is an outbound **transparent** SMTP proxy.
 
-It sits between your mail servers and the internet without any change to them. Outgoing SMTP connections are redirected to Warp at the network level, Warp records the whole session, hands the message to a filter hook if one is installed, and relays it to the destination MX.
+It relays SMTP connections between your mail servers and the destination MX without any change to the mail server configuration. Outgoing SMTP connections are redirected to Warp at the network level, Warp records the whole session, hands the message to a filter hook if one is installed, and relays it to the destination MX.
 
 [![](/images/github-mark.svg) linyows/warp - GitHub](https://github.com/linyows/warp)
 
 ## Why
 
-Outbound email is mostly invisible while it is working, and hard to explain once it is not:
+While outbound email is being delivered normally, little of each session is recorded, which makes it hard to investigate once delivery fails:
 
 - You cannot see what was sent, to whom, or how the destination server replied.
-- Throttling and blocklisting happen silently — you usually learn about them from your users.
+- Throttling and blocklisting are not explicitly reported to the sender — you usually learn about them from your users.
 - A single compromised account or misconfigured application can damage the reputation of an entire IP range.
-- Auditing outbound mail means bolting external tools onto the MTA.
+- Auditing outbound mail requires combining external tools with the MTA.
 
-Warp turns the outbound path itself into an observation and control point, without touching the MTA configuration.
+Warp records SMTP sessions on the outbound path and controls whether each message is relayed, without changing the MTA configuration.
 
 ## Features
 
 ### Observability
 
-Every SMTP command and reply is captured as it happens, in both directions and on both sides of the proxy. Warp also extracts the metadata of the session — `MAIL FROM`, `RCPT TO`, the HELO hostname and the time the destination took to accept the message — and passes it to hooks as structured data. Logs go to stdout by default, and plugins can write them to a file, MySQL, SQLite or Slack.
+Every SMTP command and reply is captured as it happens, in both directions and on both sides of the proxy. Warp also extracts the metadata of the session — `MAIL FROM`, `RCPT TO`, the HELO hostname and the time from connecting to the destination until its `354` reply — and passes it to hooks as structured data. Logs go to stdout by default, and plugins can write them to a file, MySQL, SQLite or Slack.
 
 ### Filtering
 
-Warp can buffer the entire message during the DATA phase and hand it to a filter hook before relaying it. The hook decides what happens next:
+Warp can buffer the entire message during the DATA phase and hand it to a filter hook before relaying it. Warp then acts on the `Action` of the `FilterResult` returned by the hook:
 
 | Action | Behaviour |
 |---|---|
@@ -40,7 +40,9 @@ Filtering is an extension point rather than something to switch on: none of the 
 
 ### Deliverability signals
 
-Warp records the time between connecting to the destination and its `354` reply, the point at which the destination is ready to accept the message body. That elapsed time goes into the log and into the connection metadata handed to hooks, next to every SMTP status code of the session. Warp does not judge the result itself — a destination that keeps delaying that reply is throttling you, but concluding so is left to whatever reads the logs.
+Warp records the time from the moment the connection to the destination is established until the destination replies `354` to the `DATA` command, which indicates that it is ready to accept the message body. That elapsed time goes into the log and into the connection metadata passed to hooks, together with every SMTP status code of the session. When a filter hook is in use, Warp replies `354` to the client before sending `DATA` to the destination, so the time is measured up to the client's `DATA` command instead.
+
+Warp does not evaluate this time itself. A time that keeps growing may indicate that the destination is throttling you, but that judgement is left to whatever consumes the logs.
 
 ### Outbound address
 
@@ -48,15 +50,17 @@ The source address used for relayed connections is set with `-outbound-ip` and a
 
 ## How It Works
 
-Warp does not speak for the MTA; it stands in the middle of an existing connection. An iptables rule in the `nat` table sends the connection to Warp, and Warp asks the kernel where the connection was originally headed through the `SO_ORIGINAL_DST` socket option. It then opens its own connection to that destination and copies traffic in both directions, inspecting it on the way.
+Warp is not an SMTP server that the MTA is configured to relay through; it accepts and relays the connection the MTA opens towards the destination MX. A DNAT rule in the iptables `nat` table rewrites the destination of outgoing SMTP connections to the address and port of Warp. Warp calls `getsockopt` with `SO_ORIGINAL_DST` on the accepted connection to obtain the destination address and port before the rewrite. It then opens its own connection to that destination and relays data in both directions, parsing the SMTP commands and replies as it does so.
 
-`SO_ORIGINAL_DST` reads the connection tracking entry created by NAT, and that entry only exists on the host that performed the NAT. **Warp therefore has to run on the host where the iptables rule is applied.** The MTA itself may run anywhere. This also makes Warp Linux-only in practice, since it relies on Netfilter.
+The destination returned for `SO_ORIGINAL_DST` comes from the connection tracking entry created by NAT, and that entry only exists on the host that performed the NAT. **Warp therefore has to run on the host where the iptables rule is applied.** The MTA itself may run anywhere. This also makes Warp Linux-only in practice, since it relies on Netfilter.
 
 ![Warp architecture](/images/architecture.png)
 
 ### STARTTLS
 
-Warp removes `STARTTLS` from the EHLO reply it passes back to the client, so the client keeps talking in plain text to Warp and its commands stay readable. Warp then negotiates TLS with the destination server on its own. Mail still leaves the network encrypted, and the session is still observable.
+Warp removes `STARTTLS` from the EHLO reply of the destination server before returning it to the client. The client therefore does not start TLS, the connection between the client and Warp stays in plain text, and Warp can read the commands and replies. Warp then sends `STARTTLS` to the destination server itself and establishes the TLS connection.
+
+Only the connection between Warp and the destination server is encrypted. If the MTA and Warp run on separate hosts, SMTP travels in plain text on the network between them. Warp does not verify the certificate of the destination server, and if the destination does not offer `STARTTLS`, the connection to it is in plain text as well.
 
 ## Deploy
 
@@ -78,7 +82,7 @@ Route the outgoing SMTP traffic of the MTA through the Warp host, for example by
 $ iptables -t nat -A PREROUTING -p tcp --dport 25 -j DNAT --to-destination <proxy-ip>:<proxy-port>
 ```
 
-NAT then happens on the Warp host, so the original destination stays available to Warp.
+NAT is then performed on the Warp host, so the connection tracking entry is also created there, and Warp can obtain the original destination through `SO_ORIGINAL_DST`.
 
 ## Usage
 
@@ -108,7 +112,7 @@ $ warp -ip 0.0.0.0 -port 10025 -verbose
 
 ## Plugins
 
-Warp writes to stdout on its own. Plugins extend it with somewhere to put those logs, and with the filtering decision itself. They are Go plugins: `.so` files loaded at startup from `/opt/warp/plugins`, or from the directory in `PLUGIN_PATH`. Only the names listed in `-plugins` are loaded.
+Without plugins, Warp writes logs only to stdout. Plugins store the logs in other destinations, or add the logic that makes the filtering decision. They are Go plugins: `.so` files loaded at startup from `/opt/warp/plugins`, or from the directory in `PLUGIN_PATH`. Only the names listed in `-plugins` are loaded.
 
 | Plugin | Description | Environment |
 |---|---|---|
@@ -160,11 +164,11 @@ type FilterHook interface {
 }
 ```
 
-Go plugins are version-locked: a plugin has to be built with the same Go toolchain and the same dependency versions as Warp itself, or `plugin.Open` refuses to load it. Build them together.
+A plugin has to be built with the same Go toolchain and the same dependency versions as Warp itself; otherwise `plugin.Open` returns an error and the plugin is not loaded. Build them together.
 
 ## Logs
 
-Each log line carries the connection id and a two-character marker saying which leg of the session the data belongs to. The markers distinguish traffic that Warp passed through from traffic it handled itself, which is what makes a STARTTLS session readable:
+Each log line carries the connection id and a two-character marker saying which leg of the session the data belongs to. The markers distinguish data that Warp relayed unchanged from data that Warp rewrote or sent and received itself. In a STARTTLS session, for example, the EHLO reply received from the destination (`|<`) and the reply returned to the client with `STARTTLS` removed (`<|`) are logged on separate lines:
 
 | Marker | Meaning |
 |---|---|
@@ -195,4 +199,4 @@ A session where the destination offers STARTTLS looks like this:
 2023/11/27 08:14:54.959710 01HG7XGYYZCEB3WSNXPAVG4ZZN -- connections closed
 ```
 
-Warp ships with an integration test that starts a sending client and a receiving server, so the whole path can be exercised locally with `make integration`.
+Warp ships with an integration test that starts a sending client and a receiving server, so `make integration` tests the path from the client through Warp to the receiving server locally.
